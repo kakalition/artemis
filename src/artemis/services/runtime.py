@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agentkit.db.engine import DB_LOCK
 from agentkit.runtime import Runtime as _BaseRuntime
 from agentkit.runtime import repositories as _agentkit_repositories
 from sqlalchemy import Engine
@@ -42,7 +43,8 @@ def build_runtime(settings: Settings | None = None) -> Runtime:
     settings = settings or get_settings()
     settings.ensure_dirs()
     engine = create_db_engine(settings.resolved_database_url, auth_token=settings.libsql_auth_token)
-    bootstrap(engine, settings.owner_id, settings.owner_name)
+    with DB_LOCK:  # serialize schema creation across concurrently-booting services
+        bootstrap(engine, settings.owner_id, settings.owner_name)
     return Runtime(settings=settings, engine=engine, session_factory=make_session_factory(engine))
 
 
