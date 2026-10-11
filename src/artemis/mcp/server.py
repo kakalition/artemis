@@ -1,16 +1,23 @@
 """Artemis as an MCP server (``artemis mcp``).
 
-Exposes **read-only** finance tools so other agents can query the ledger.
-Writes are deliberately not exposed. Defaults to stdio; HTTP transports bind
-loopback only.
+Exposes the **full finance agent** through the ``ask_artemis`` tool (reads plus
+normal writes such as recording transactions, budgets, goals and prices). Bulk
+and destructive tools stay approval-gated; with no interactive approver over
+MCP they are denied unless ``MCP_AUTO_APPROVE`` is explicitly set.
+
+The structured read-only tools and the artifact resource are kept for clients
+that want typed data. Defaults to stdio; HTTP transports bind loopback only.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastmcp import FastMCP
 
+from artemis.agents.deps import ApprovalRequest
 from artemis.agents.schemas import GoalRecord
-from artemis.config import Settings
+from artemis.config import Settings, build_model
 from artemis.domain.money import format_minor
 from artemis.domain.reports import (
     BudgetStatus,
@@ -21,18 +28,76 @@ from artemis.domain.reports import (
     period_bounds,
     summarize_portfolio,
 )
-from artemis.services.runtime import Runtime, build_runtime, repositories
+from artemis.mcp.registry import MCPRegistry
+from artemis.services.runtime import Runtime, build_deps, build_runtime, repositories
 
 INSTRUCTIONS = (
-    "Read-only access to the owner's personal finances. All amounts are integer "
-    "minor units plus an ISO-4217 currency; never convert between currencies. "
-    "This server cannot modify any data."
+    "Artemis is a personal finance agent. Use `ask_artemis` to ask it anything "
+    "in natural language — it can read the ledger and record expenses, set "
+    "budgets, manage goals, and update the portfolio. Bulk/destructive actions "
+    "(CSV import, deleting transactions) require approval and are denied over "
+    "MCP unless the operator enables auto-approval. The structured read-only "
+    "tools return exact amounts as integer minor units plus an ISO-4217 "
+    "currency; never convert between currencies."
 )
 
 
-def build_server(settings: Settings, runtime: Runtime | None = None) -> FastMCP:
+async def _auto_approver(requests: list[ApprovalRequest]) -> dict[str, bool]:
+    return {request.tool_call_id: True for request in requests}
+
+
+def build_server(
+    settings: Settings,
+    runtime: Runtime | None = None,
+    *,
+    model: object | None = None,
+    registry: MCPRegistry | None = None,
+    a2a_client: object | None = None,
+    auto_approve: bool | None = None,
+) -> FastMCP:
     runtime = runtime or build_runtime(settings)
-    mcp = FastMCP(name="artemis", instructions=INSTRUCTIONS)
+    if auto_approve is None:
+        auto_approve = settings.mcp_auto_approve
+
+    @asynccontextmanager
+    async def lifespan(server: FastMCP):
+        # Own the apollo MCP toolsets for the lifetime of this server.
+        if registry is not None:
+            async with registry:
+                yield
+        else:
+            yield
+
+    mcp = FastMCP(name="artemis", instructions=INSTRUCTIONS, lifespan=lifespan)
+
+    @mcp.tool
+    async def ask_artemis(prompt: str, conversation_id: str = "mcp:default") -> str:
+        """Ask the full Artemis agent (reads and writes).
+
+        Args:
+            prompt: The natural-language request.
+            conversation_id: Conversation to use, so callers keep separate
+                histories (default "mcp:default").
+        """
+        from artemis.a2a.client import build_a2a_client
+        from artemis.services.session import ChatRunner
+
+        with repositories(runtime) as repos:
+            deps = build_deps(
+                runtime,
+                repos,
+                model=model or build_model(settings),
+                mcp=registry,
+                a2a=a2a_client or build_a2a_client(settings),
+                approve=_auto_approver if auto_approve else None,
+            )
+            runner = ChatRunner(deps, conversation_id=conversation_id)
+            result = await runner.send(prompt)
+        output = result.output
+        if result.artifacts:
+            lines = [f"- {a['kind']}: {a['path']}" for a in result.artifacts]
+            output = f"{output}\n\nArtifacts:\n" + "\n".join(lines)
+        return output
 
     @mcp.tool
     def query_spending(
@@ -40,9 +105,7 @@ def build_server(settings: Settings, runtime: Runtime | None = None) -> FastMCP:
     ) -> SpendingReport:
         """Spend by category/merchant for a period (a month like 2026-01 or a keyword)."""
         with repositories(runtime) as repos:
-            return build_spending_report(
-                repos, period=period, currency=currency, top_n=top_n
-            )
+            return build_spending_report(repos, period=period, currency=currency, top_n=top_n)
 
     @mcp.tool
     def get_budget_status(period: str = "this-month", currency: str | None = None) -> BudgetStatus:
@@ -105,11 +168,12 @@ def serve(
     from artemis.guardrails import warn_if_exposed
 
     runtime = build_runtime(settings)
-    mcp = build_server(settings, runtime)
+    registry = MCPRegistry(settings)
     host = host or settings.mcp_host
     port = port or settings.mcp_port
     if transport != "stdio":
         warn_if_exposed(host, "the Artemis MCP server")
+    mcp = build_server(settings, runtime, registry=registry)
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport in {"streamable-http", "http"}:

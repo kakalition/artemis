@@ -135,16 +135,20 @@ restart does not orphan stdio subprocesses. Each server is launched with
 FastMCP protocol negotiation, which gracefully falls back for the
 handshake-era apollo servers.
 
-**Server.** `artemis mcp` exposes **read-only** tools only:
+**Server.** `artemis mcp` exposes the **full agent** plus typed read-only tools:
 
-| Tool | Returns |
+| Tool | Does |
 | --- | --- |
+| `ask_artemis(prompt, conversation_id="mcp:default")` | Runs the full agent — reads and normal writes (record transactions, budgets, goals, portfolio, insights, reports). |
 | `query_spending(period, currency, top_n)` | `SpendingReport` |
 | `get_budget_status(period, currency)` | `BudgetStatus` |
 | `get_portfolio_summary(currency)` | `PortfolioSummary` |
 | `list_goals()` | `list[GoalRecord]` |
 
-Plus a resource `artemis://artifact/{name}` for generated reports. HTTP
+Plus a resource `artemis://artifact/{name}` for generated reports. Bulk and
+destructive tools (`import_transactions`, `delete_transaction`) stay
+approval-gated; because there is no interactive approver over MCP they are
+**denied** unless you set `MCP_AUTO_APPROVE=true` (dangerous, opt-in). HTTP
 transports bind loopback by default and warn if exposed.
 
 ## A2A

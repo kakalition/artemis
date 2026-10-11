@@ -265,7 +265,7 @@ def mcp(
     host: str | None = typer.Option(None, help="Bind host (HTTP transports)."),
     port: int | None = typer.Option(None, help="Bind port (HTTP transports)."),
 ) -> None:
-    """Run Artemis as a read-only MCP server."""
+    """Run Artemis as an MCP server (full agent + read-only tools)."""
     from artemis.mcp.server import serve
 
     serve(get_settings(), transport=transport, host=host, port=port)

@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # --- MCP server -----------------------------------------------------
     mcp_host: str = "127.0.0.1"
     mcp_port: int = 8765
+    # When the MCP server runs the full agent, bulk/destructive tools still
+    # require approval. There is no interactive approver over MCP, so they are
+    # denied unless this is explicitly enabled (dangerous; opt-in).
+    mcp_auto_approve: bool = False
 
     @field_validator("telegram_allowed_chat_ids", mode="before")
     @classmethod
