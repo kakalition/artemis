@@ -1,0 +1,74 @@
+[project]
+name = "artemis"
+version = "0.1.0"
+description = "Artemis — a personal finance agent built on PydanticAI (CLI + Telegram, MCP + A2A)"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Artemis" }]
+dependencies = [
+    "pydantic-ai>=2.55.0,<3",
+    "fastmcp-slim[server]>=4.1.0,<5",
+    "a2a-sdk>=1.2.2,<2",
+    "sqlmodel>=0.0.22",
+    "sqlalchemy>=2.0.36",
+    "sqlalchemy-libsql>=0.2.0",
+    "aiogram>=3.15,<4",
+    "typer>=0.15",
+    "pydantic-settings>=2.6",
+    "python-dotenv>=1.0",
+    "uvicorn>=0.32",
+    "httpx>=0.28.1",
+    "telegramify-markdown>=1.4.0",
+    "python-dateutil>=2.9.0.post0",
+    "babel>=2.18.0",
+]
+
+[project.optional-dependencies]
+prices = ["yfinance>=0.2.50"]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[project.scripts]
+artemis = "artemis.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/artemis"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# B008: Typer/Click options are meant to be called in argument defaults.
+ignore = ["E501", "B008"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: tests that exercise real subprocesses, HTTP round-trips, or external SDKs",
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+# SQLModel's `order_by`/column stubs and the `list` method name (which shadows
+# the builtin in class-body annotations) produce false positives in the repo
+# layer only; runtime is correct and covered by tests.
+[[tool.mypy.overrides]]
+module = "artemis.db.repos"
+disable_error_code = ["arg-type", "attr-defined", "union-attr", "valid-type", "misc"]

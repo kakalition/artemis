@@ -1,0 +1,201 @@
+# Artemis
+
+A single-user (multi-user-ready) **personal finance agent** built on
+[PydanticAI v2](https://pydantic.dev/docs/ai/), exposed through a **Typer CLI**
+and an **aiogram Telegram bot**, backed by **libSQL/Turso**, and interoperating
+over **MCP** and **A2A**.
+
+Artemis tracks expenses/income, categorizes them (rules first, LLM fallback),
+imports CSV/bank statements, tracks budgets, savings goals and an investment
+portfolio, answers spending questions, and renders spending **charts (PNG)** and
+**PDF** reports through the two local apollo MCP servers.
+
+> Educational guidance only — not regulated financial advice. Artemis never
+> moves money.
+
+Built on established libraries rather than hand-rolled equivalents: **PydanticAI
+v2** (agents), **FastMCP** (MCP client + server), **a2a-sdk** (A2A client +
+server), **Babel** (currency precision/formatting), **python-dateutil** (dates),
+**telegramify-markdown** (Telegram rendering), **aiogram**, **Typer**,
+**pydantic-settings**, **SQLModel / SQLAlchemy** over **libSQL**, and **httpx**.
+
+## Features
+
+- **Six specialists** behind one orchestrator: transactions, budgets, goals,
+  portfolio, insights, and reports (charts/PDF).
+- **Money discipline**: every amount is integer minor units + an ISO-4217
+  currency. No `float` on any monetary path; reports group by currency and never
+  convert.
+- **Durable history**: conversations persist in libSQL via PydanticAI's message
+  adapter, keyed by `cli:default` / `tg:<chat_id>` / `a2a:default`.
+- **Human-in-the-loop**: bulk (`import_transactions`) and destructive
+  (`delete_transaction`) tools pause for approval — a CLI prompt or Telegram
+  inline buttons — via PydanticAI deferred tools.
+- **MCP both ways**: consumes `apollo-charting` + `apollo-pdf-creator`, and
+  serves a **read-only** finance MCP server.
+- **A2A both ways**: publishes an agent card + JSON-RPC server; the orchestrator
+  can call configured remote agents.
+
+## Install
+
+```bash
+git clone <repo> artemis && cd artemis
+./install.sh                      # uv sync --extra dev
+cp .env.example .env              # then edit
+```
+
+Requires **Python 3.11–3.12** and [uv](https://docs.astral.sh/uv/). Optional
+free market data: `uv sync --extra prices` (installs `yfinance`).
+
+## Configure
+
+All settings are environment variables (see `.env.example`); `.env` is loaded
+automatically.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | – | Model credential. |
+| `OPENAI_BASE_URL` | – | Point at any OpenAI-compatible gateway. |
+| `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
+| `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The single owner. |
+| `LIBSQL_URL` | local file under `ARTEMIS_HOME` | `sqlite+libsql:///…` or Turso. |
+| `LIBSQL_AUTH_TOKEN` | – | Turso auth token. |
+| `ARTEMIS_HOME` | `~/.local/share/artemis` | DB + artifacts directory. |
+| `TELEGRAM_BOT_TOKEN` | – | Enables `artemis bot`. |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | (all) | Comma/space-separated chat allowlist. |
+| `PRICE_SOURCE` | `manual` | `manual` or `yfinance`. |
+| `CHARTING_DIR` / `PDF_DIR` | apollo checkouts | Where the MCP servers live. |
+| `CHARTING_MCP_URL` / `PDF_MCP_URL` | – | Use HTTP transport instead of stdio. |
+| `A2A_PUBLIC_URL` | `http://127.0.0.1:9000` | Advertised card URL. |
+| `A2A_HOST` / `A2A_PORT` | `127.0.0.1` / `9000` | A2A bind address. |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP bind address. |
+| `PEERS_FILE` | – | `peers.json` of remote A2A agents. |
+
+## CLI
+
+```bash
+artemis chat                                   # interactive agent (CLI conversation)
+artemis import statement.csv [--dayfirst]      # import CSV/bank statement
+artemis report --period 2026-01 [--chart --pdf] [--out DIR]
+artemis budget --period 2026-01                # status
+artemis budget --set Groceries --amount 500    # set
+artemis portfolio                              # summary
+artemis portfolio --add AAPL --quantity 2 --cost 300
+artemis portfolio --price AAPL --value 160
+artemis bot                                    # Telegram long-polling
+artemis mcp [--transport stdio|streamable-http|sse]
+artemis a2a                                    # A2A server
+```
+
+`report --chart/--pdf` renders artifacts through the MCP servers **without** an
+LLM; the artifact's absolute path is printed and optionally copied with `--out`.
+
+### CSV import
+
+Canonical columns (case-insensitive; aliases in parentheses):
+
+| Column | Required | Notes |
+| --- | --- | --- |
+| `date` | yes | `posted_at`, `transaction_date`; ISO or `MM/DD/YYYY` (`--dayfirst` for `DD/MM/YYYY`). |
+| `amount` | yes* | `value`; `-42.50`, `$1,234.56`, `(42.00)`. |
+| `description` | yes | `memo`, `narrative`, `details`. |
+| `currency` | no | `ccy`; defaults to `--currency`. |
+| `merchant` | no | `payee`, `counterparty`. |
+| `external_id` | no | `id`, `reference`; used to dedupe. Synthesized when absent. |
+| `category` | no | `category_name`. |
+| `debit` / `credit` | no | Used when `amount` is absent (debit = outflow). |
+
+Bad rows never abort an import; they are reported as warnings.
+
+## Telegram
+
+`artemis bot` runs long-polling. Each chat is a conversation (`tg:<chat_id>`).
+Replies are rendered from Markdown to Telegram entities with
+[`telegramify-markdown`](https://pypi.org/project/telegramify-markdown/) (which
+converts, escapes and splits into ≤4096-char messages), with a plain-text
+fallback if Telegram rejects an entity. Approvals arrive as inline ✅/❌ buttons.
+Charts/PDFs are delivered as photos/documents. Restrict access with
+`TELEGRAM_ALLOWED_CHAT_IDS`.
+
+## MCP
+
+**Client.** Artemis consumes the apollo servers with prefixed toolsets so the
+shared `validate_spec` tool does not collide:
+
+| Prefix | Server | Tools |
+| --- | --- | --- |
+| `chart_` | apollo-charting | `render_chart`, `validate_spec`, `chart_component` |
+| `pdf_` | apollo-pdf-creator | `create_pdf`, `validate_spec`, `from_markdown` |
+
+Toolset lifecycle is owned by the process (entered once, closed on shutdown);
+`artemis bot`/`a2a` prefer HTTP transport (`CHARTING_MCP_URL`/`PDF_MCP_URL`) so a
+restart does not orphan stdio subprocesses. Each server is launched with
+`uv run --directory <server> <console-script>` and its logs go to
+`$ARTEMIS_HOME/logs/` rather than the console. The client uses the newest
+FastMCP protocol negotiation, which gracefully falls back for the
+handshake-era apollo servers.
+
+**Server.** `artemis mcp` exposes **read-only** tools only:
+
+| Tool | Returns |
+| --- | --- |
+| `query_spending(period, currency, top_n)` | `SpendingReport` |
+| `get_budget_status(period, currency)` | `BudgetStatus` |
+| `get_portfolio_summary(currency)` | `PortfolioSummary` |
+| `list_goals()` | `list[GoalRecord]` |
+
+Plus a resource `artemis://artifact/{name}` for generated reports. HTTP
+transports bind loopback by default and warn if exposed.
+
+## A2A
+
+Both directions use the official **`a2a-sdk`**. `artemis a2a` serves the agent
+card at `/.well-known/agent-card.json` and JSON-RPC at `/`; an
+`AgentExecutor` answers with a single agent `Message` (the SDK's immediate-
+response workflow) whose text comes from the orchestrator, so replies are
+verbatim. Tasks are kept in the SDK's in-memory store (they do not survive
+restarts); a persistent `TaskStore` is the durability upgrade. The outbound
+client resolves the peer's card and calls `message/send` through the SDK.
+
+Outbound, the orchestrator can call peers from `PEERS_FILE`:
+
+```json
+{ "peers": { "research": { "url": "http://127.0.0.1:9100", "token": "" } } }
+```
+
+## Data model & money rules
+
+`owners, accounts, categories, merchant_rules, transactions, budgets, goals,
+goal_contributions, holdings, price_snapshots, conversations, messages,
+a2a_tasks`. Transactions store `amount_minor` (signed int: negative = spend)
+plus `currency`. Parsing is `str → Decimal → int`; formatting is
+`int → Decimal → str`. Per-transaction currency; reports group by currency with
+no FX conversion.
+
+## Security
+
+- Loopback-only MCP/A2A binds by default (with an exposure warning).
+- Read-only MCP server; no writes exposed.
+- Imported CSV, MCP resource text and remote replies are passed as **data**, not
+  instructions.
+- No secrets or raw amounts are logged.
+
+## Development
+
+```bash
+uv run pytest                      # unit tests (in-process, no network)
+uv run pytest -m integration       # real apollo stdio round-trip (self-skips)
+uv run ruff check src tests
+bash tests/smoke.sh                # CLI end-to-end in a temp HOME
+uv run python tests/mcp_smoke.py   # in-process read-only MCP server round-trip
+```
+
+Layout: `src/artemis/{config,cli,render,guardrails}.py`,
+`domain/` (money, categorizer, imports, reports), `db/` (engine, models,
+migrations, repos), `agents/` (orchestrator + six specialists), `services/`
+(runtime, ledger, session), `prices/`, `mcp/` (client registry + server),
+`a2a/` (client + server), `gateways/telegram_bot.py`.
+
+## License
+
+MIT.

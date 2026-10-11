@@ -1,0 +1,9 @@
+date,amount,description,currency,merchant,external_id
+2026-01-05,-42.50,Weekly grocery run,USD,Whole Foods,sample-0001
+2026-01-08,-18.99,Lunch burrito,USD,Cafe Rio,sample-0002
+2026-01-12,-52.00,Weekly grocery run,USD,Whole Foods,sample-0003
+2026-01-15,-24.00,Lunch bowl,USD,Cafe Rio,sample-0004
+2026-01-20,-120.00,Electricity bill,USD,City Power,sample-0005
+2026-02-02,-61.00,Weekly grocery run,USD,Whole Foods,sample-0006
+2026-02-03,-9.99,Streaming subscription,USD,Netflix,sample-0007
+2026-02-05,2500.00,Paycheck,USD,Acme Corp,sample-0008

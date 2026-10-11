@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+# Local provider config may contain a plaintext API key — never commit it.
+kilo.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.data/
+artifacts/
+output/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
