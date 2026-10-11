@@ -17,6 +17,7 @@ from agentkit.gateways.telegram import (  # noqa: F401  (re-exported for tests)
     ApprovalBroker,
     _tg_entities,
     react_seen,
+    run_turn,
     send_markdown,
 )
 from agentkit.gateways.telegram import is_allowed as _is_allowed_ids
@@ -92,19 +93,26 @@ def register_handlers(
         if not is_allowed(settings, chat_id):
             await message.answer("This bot is private.")
             return
-        await react_seen(message)
+        await react_seen(message, enabled=settings.telegram_seen_reaction)
         if message.text and message.text.strip().startswith("/start"):
             await message.answer("Artemis ready. Ask about your spending, budgets, goals or portfolio.")
             return
         if message.bot is None:
             return
-        await handle_message(
-            runtime=runtime,
-            registry=registry,
-            broker=broker,
+        await run_turn(
+            lambda: handle_message(
+                runtime=runtime,
+                registry=registry,
+                broker=broker,
+                bot=message.bot,
+                chat_id=chat_id,
+                text=message.text or "",
+            ),
             bot=message.bot,
             chat_id=chat_id,
-            text=message.text or "",
+            live_status=settings.telegram_live_status,
+            typing=settings.telegram_typing_action,
+            phrase_interval_s=settings.telegram_status_interval_s,
         )
 
     @dp.callback_query(F.data.startswith("approve:"))
