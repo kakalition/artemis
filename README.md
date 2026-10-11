@@ -1,30 +1,41 @@
 # Artemis
 
-A single-user (multi-user-ready) **personal finance agent** built on
-[PydanticAI v2](https://pydantic.dev/docs/ai/), exposed through a **Typer CLI**
-and an **aiogram Telegram bot**, backed by **libSQL/Turso**, and interoperating
-over **MCP** and **A2A**.
+**A personal finance agent** — track spending, budgets, goals and a portfolio,
+ask questions about your money, and generate chart/PDF reports — through a CLI
+and a Telegram bot, with an MCP server and an A2A endpoint.
 
-Artemis tracks expenses/income, categorizes them (rules first, LLM fallback),
-imports CSV/bank statements, tracks budgets, savings goals and an investment
-portfolio, answers spending questions, and renders spending **charts (PNG)** and
-**PDF** reports through the two local apollo MCP servers.
+Built on [**agentkit**](https://github.com/kakalition/agentkit) (PydanticAI v2 +
+durable execution + MCP/A2A), **libSQL**, and a set of local MCP servers for
+charts and PDFs. Artemis is the finance domain; agentkit is the plumbing.
+
+[![CI](https://github.com/kakalition/artemis/actions/workflows/ci.yml/badge.svg)](https://github.com/kakalition/artemis/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-120-brightgreen)
 
 > Educational guidance only — not regulated financial advice. Artemis never
 > moves money.
 
-Built on established libraries rather than hand-rolled equivalents: **PydanticAI
-v2** (agents), **FastMCP** (MCP client + server), **a2a-sdk** (A2A client +
-server), **Babel** (currency precision/formatting), **python-dateutil** (dates),
-**telegramify-markdown** (Telegram rendering), **aiogram**, **Typer**,
-**pydantic-settings**, **SQLModel / SQLAlchemy** over **libSQL**, and **httpx**.
+---
 
-The generic agent plumbing — orchestrator + delegation, deps, HITL approvals,
-session/history, runtime + repositories, DBOS durability, the cron/one-off
-scheduler, the MCP client registry, the A2A server/client + durable task store,
-Telegram/CLI helpers and observability — is factored into
-[**`agentkit`**](https://github.com/kakalition/agentkit). Artemis is the finance
-domain layered on top.
+## Table of contents
+
+- [Features](#features)
+- [Install](#install)
+- [Configure](#configure)
+- [CLI](#cli)
+- [CSV import](#csv-import)
+- [Telegram](#telegram)
+- [MCP](#mcp)
+- [A2A](#a2a)
+- [Durability & scheduling](#durability--scheduling)
+- [Persona (`SOUL.md`)](#persona-soulmd)
+- [Observability](#observability)
+- [Data model & money rules](#data-model--money-rules)
+- [Security](#security)
+- [Deployment](#deployment)
+- [Development](#development)
+- [License](#license)
 
 ## Features
 
@@ -33,248 +44,221 @@ domain layered on top.
 - **Money discipline**: every amount is integer minor units + an ISO-4217
   currency. No `float` on any monetary path; reports group by currency and never
   convert.
-- **Durable history**: conversations persist in libSQL via PydanticAI's message
-  adapter, keyed by `cli:default` / `tg:<chat_id>` / `a2a:default`.
+- **Durable history** in libSQL, keyed by `cli:default` / `tg:<chat_id>` /
+  `a2a:default`.
 - **Human-in-the-loop**: bulk (`import_transactions`) and destructive
   (`delete_transaction`) tools pause for approval — a CLI prompt or Telegram
   inline buttons — via PydanticAI deferred tools.
-- **Durable & resilient**: DBOS durable workflows/queues/schedules on a local
-  SQLite system DB **and** A2A tasks persisted in libSQL (survive restarts);
-  model timeouts, SDK retries, optional per-run usage caps, and optional
-  Logfire/OTel instrumentation.
-- **Persona `SOUL.md`**: the agent's identity and behaviour live in a Markdown
-  file (project root or `$ARTEMIS_HOME`), composed with the routing
-  instructions — edit the persona without touching code (`artemis soul`).
+- **Durable & resilient**: DBOS durable turns/jobs, durable **cron + one-off**
+  scheduling, model timeouts/retries, optional per-run usage caps.
+- **Persona `SOUL.md`**: identity/behaviour is Markdown (project root or
+  `$ARTEMIS_HOME`), composed with routing instructions.
 - **Operational**: structured JSON logs with correlation ids and redaction,
-  per-turn token accounting, a hash-chained **audit log**, readiness (`/readyz`)
-  and graceful shutdown — all via agentkit.
+  per-turn **token accounting**, a hash-chained **audit log**, readiness
+  (`/readyz`) and graceful shutdown.
 - **MCP both ways**: consumes `apollo-charting` + `apollo-pdf-creator`, and
   serves a **full-agent** MCP server plus typed read-only tools.
-- **A2A both ways**: publishes an agent card + JSON-RPC server; the orchestrator
-  can call configured remote agents.
+- **A2A both ways**: task-based server with a durable task store; the
+  orchestrator can call configured remote agents.
 
 ## Install
 
 ```bash
-git clone <repo> artemis && cd artemis
-./install.sh                      # uv sync --extra dev
-cp .env.example .env              # then edit
+git clone https://github.com/kakalition/artemis && cd artemis
+./install.sh                       # uv sync (incl. the local Phoenix observability UI)
+cp .env.example .env               # then edit
 ```
 
-Requires **Python 3.11–3.12** and [uv](https://docs.astral.sh/uv/). Optional
-free market data: `uv sync --extra prices` (installs `yfinance`).
+Requires **Python 3.11–3.12** and [uv](https://docs.astral.sh/uv/). Optional free
+market data: `uv sync --extra prices`.
 
 ## Configure
 
-All settings are environment variables (see `.env.example`); `.env` is loaded
-automatically.
+Environment variables (see `.env.example`); `.env` is loaded automatically.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | – | Model credential. |
-| `OPENAI_BASE_URL` | – | Point at any OpenAI-compatible gateway. |
-| `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
-| `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Per-request timeout and SDK retries. |
-| `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Optional per-run caps. |
-| `OBSERVABILITY` | `phoenix` | `phoenix` (local UI) \| `console` \| `otlp` \| `off`. Self-hosted, no account. |
-| `OTLP_ENDPOINT` | – | OTLP endpoint for `observability=otlp` (Phoenix/Jaeger/Tempo/Langfuse). |
-| `LOG_JSON` | `false` | Emit structured JSON logs with correlation ids. |
-| `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports. |
-| `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The single owner. |
-| `LIBSQL_URL` | local file under `ARTEMIS_HOME` | `sqlite+libsql:///…` or Turso. |
-| `LIBSQL_AUTH_TOKEN` | – | Turso auth token. |
-| `ARTEMIS_HOME` | `~/.local/share/artemis` | DB + artifacts directory. |
-| `TELEGRAM_BOT_TOKEN` | – | Enables `artemis bot`. |
-| `TELEGRAM_ALLOWED_CHAT_IDS` | (all) | Comma/space-separated chat allowlist. |
-| `PRICE_SOURCE` | `manual` | `manual` or `yfinance`. |
-| `CHARTING_DIR` / `PDF_DIR` | apollo checkouts | Where the MCP servers live. |
-| `CHARTING_MCP_URL` / `PDF_MCP_URL` | – | Use HTTP transport instead of stdio. |
-| `A2A_PUBLIC_URL` | `http://127.0.0.1:9000` | Advertised card URL. |
-| `A2A_HOST` / `A2A_PORT` | `127.0.0.1` / `9000` | A2A bind address. |
-| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP bind address. |
-| `PEERS_FILE` | – | `peers.json` of remote A2A agents. |
+| `OPENAI_API_KEY` | – | Model credential |
+| `OPENAI_BASE_URL` | – | Any OpenAI-compatible gateway |
+| `MODEL_NAME` | `openai:gpt-4o-mini` | Model id |
+| `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Transport resilience |
+| `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
+| `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The owner |
+| `LIBSQL_URL` / `LIBSQL_AUTH_TOKEN` | local file | `sqlite+libsql://…` or Turso |
+| `ARTEMIS_HOME` | `~/.local/share/artemis` | DB + artifacts + logs |
+| `SOUL_FILE` | `./SOUL.md` or `$ARTEMIS_HOME/SOUL.md` | Persona |
+| `TELEGRAM_BOT_TOKEN` | – | Enables `artemis bot` |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | (all) | Chat allowlist |
+| `PRICE_SOURCE` | `manual` | `manual` or `yfinance` |
+| `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports |
+| `CHARTING_DIR` / `PDF_DIR` | apollo checkouts | MCP servers |
+| `CHARTING_MCP_URL` / `PDF_MCP_URL` | – | HTTP transport instead of stdio |
+| `A2A_PUBLIC_URL` / `A2A_HOST` / `A2A_PORT` | `http://127.0.0.1:9000` | A2A |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP |
+| `PEERS_FILE` | – | `peers.json` of remote A2A agents |
+| `OBSERVABILITY` | `phoenix` | `phoenix` (local UI) \| `console` \| `otlp` \| `off` |
+| `LOG_LEVEL` / `LOG_JSON` | `INFO` / `false` | Logging |
 
 ## CLI
 
 ```bash
-artemis chat                                   # interactive agent (CLI conversation)
+artemis up                                     # run everything: worker + A2A + MCP + bot
+artemis chat                                   # interactive agent
 artemis import statement.csv [--dayfirst]      # import CSV/bank statement
 artemis report --period 2026-01 [--chart --pdf] [--out DIR]
 artemis budget --period 2026-01                # status
 artemis budget --set Groceries --amount 500    # set
-artemis portfolio                              # summary
-artemis portfolio --add AAPL --quantity 2 --cost 300
-artemis portfolio --price AAPL --value 160
+artemis portfolio [--add SYMBOL --quantity 2 --cost 300] [--price SYMBOL --value 160]
 artemis bot                                    # Telegram long-polling
 artemis mcp [--transport stdio|streamable-http|sse]
 artemis a2a                                    # A2A server
-artemis worker                                 # durable worker (queues + cron schedules)
+artemis worker                                 # durable worker (queues + schedules)
 artemis job-report --period last-month [--chart --pdf] [--enqueue]
 artemis job-turn "how much did I spend this month?"
 artemis schedule-add-report --name weekly --cron "0 8 * * 1" --period last-month
 artemis schedule-add-report --name reminder --at 2026-11-01T09:00 --period last-month
-artemis schedule-list
-artemis schedule-remove weekly
-artemis backup ~/artemis-backup.db             # copy the local database
-artemis export --out transactions.json --format json
-artemis db upgrade                             # apply Alembic migrations
-artemis db revision -m "add something"         # autogenerate a migration
-artemis soul                                   # show the active persona
-artemis soul --init                            # scaffold a SOUL.md
-artemis up                                     # run everything: worker + A2A + MCP + bot
+artemis schedule-list / schedule-remove
 artemis workflows [--status ERROR] [--show ID] [--cancel ID] [--resume ID]
+artemis backup ~/artemis-backup.db ; artemis export --out tx.json --format json
+artemis db upgrade ; artemis soul [--init]
 ```
 
-`report --chart/--pdf` renders artifacts through the MCP servers **without** an
-LLM; the artifact's absolute path is printed and optionally copied with `--out`.
-
-### CSV import
+## CSV import
 
 Canonical columns (case-insensitive; aliases in parentheses):
 
 | Column | Required | Notes |
 | --- | --- | --- |
-| `date` | yes | `posted_at`, `transaction_date`; ISO or `MM/DD/YYYY` (`--dayfirst` for `DD/MM/YYYY`). |
-| `amount` | yes* | `value`; `-42.50`, `$1,234.56`, `(42.00)`. |
-| `description` | yes | `memo`, `narrative`, `details`. |
-| `currency` | no | `ccy`; defaults to `--currency`. |
-| `merchant` | no | `payee`, `counterparty`. |
-| `external_id` | no | `id`, `reference`; used to dedupe. Synthesized when absent. |
-| `category` | no | `category_name`. |
-| `debit` / `credit` | no | Used when `amount` is absent (debit = outflow). |
+| `date` | yes | `posted_at`, `transaction_date`; ISO or `MM/DD/YYYY` (`--dayfirst` for `DD/MM/YYYY`) |
+| `amount` | yes* | `value`; `-42.50`, `$1,234.56`, `(42.00)` |
+| `description` | yes | `memo`, `narrative`, `details` |
+| `currency` | no | `ccy`; defaults to `--currency` |
+| `merchant` | no | `payee`, `counterparty` |
+| `external_id` | no | `id`, `reference`; used to dedupe |
+| `category` | no | `category_name` |
+| `debit` / `credit` | no | Used when `amount` is absent |
 
-Bad rows never abort an import; they are reported as warnings.
+Bad rows never abort an import; they are reported as warnings. Imports larger
+than `MAX_IMPORT_BYTES` are rejected.
 
 ## Telegram
 
 `artemis bot` runs long-polling. Each chat is a conversation (`tg:<chat_id>`).
-Replies are rendered from Markdown to Telegram entities with
-[`telegramify-markdown`](https://pypi.org/project/telegramify-markdown/) (which
-converts, escapes and splits into ≤4096-char messages), with a plain-text
-fallback if Telegram rejects an entity. Approvals arrive as inline ✅/❌ buttons.
-Charts/PDFs are delivered as photos/documents. Restrict access with
-`TELEGRAM_ALLOWED_CHAT_IDS`.
+Replies render Markdown → Telegram entities (telegramify-markdown) with a
+plain-text fallback. Approvals arrive as inline ✅/❌ buttons. Charts/PDFs are
+delivered as photos/documents. Restrict access with `TELEGRAM_ALLOWED_CHAT_IDS`.
 
 ## MCP
 
 **Client.** Artemis consumes the apollo servers with prefixed toolsets so the
-shared `validate_spec` tool does not collide:
-
-| Prefix | Server | Tools |
-| --- | --- | --- |
-| `chart_` | apollo-charting | `render_chart`, `validate_spec`, `chart_component` |
-| `pdf_` | apollo-pdf-creator | `create_pdf`, `validate_spec`, `from_markdown` |
-
-Toolset lifecycle is owned by the process (entered once, closed on shutdown);
-`artemis bot`/`a2a` prefer HTTP transport (`CHARTING_MCP_URL`/`PDF_MCP_URL`) so a
-restart does not orphan stdio subprocesses. Each server is launched with
-`uv run --directory <server> <console-script>` and its logs go to
-`$ARTEMIS_HOME/logs/` rather than the console. The client uses the newest
-FastMCP protocol negotiation, which gracefully falls back for the
-handshake-era apollo servers.
+shared `validate_spec` tool does not collide (`chart_*` / `pdf_*`). Toolset
+lifecycle is process-owned; each server is launched with
+`uv run --directory <server> <script>`, logs go to `$ARTEMIS_HOME/logs/`, and
+the client uses the newest FastMCP protocol negotiation.
 
 **Server.** `artemis mcp` exposes the **full agent** plus typed read-only tools:
 
 | Tool | Does |
 | --- | --- |
-| `ask_artemis(prompt, conversation_id="mcp:default")` | Runs the full agent — reads and normal writes (record transactions, budgets, goals, portfolio, insights, reports). |
+| `ask_artemis(prompt, conversation_id="mcp:default")` | Runs the full agent (reads + normal writes) |
 | `query_spending(period, currency, top_n)` | `SpendingReport` |
 | `get_budget_status(period, currency)` | `BudgetStatus` |
 | `get_portfolio_summary(currency)` | `PortfolioSummary` |
 | `list_goals()` | `list[GoalRecord]` |
 
-Plus a resource `artemis://artifact/{name}` for generated reports. Bulk and
-destructive tools (`import_transactions`, `delete_transaction`) stay
-approval-gated; because there is no interactive approver over MCP they are
-**denied** unless you set `MCP_AUTO_APPROVE=true` (dangerous, opt-in). HTTP
-transports bind loopback by default and warn if exposed.
+Bulk/destructive tools stay approval-gated and are **denied** over MCP unless
+`MCP_AUTO_APPROVE=true` (dangerous, opt-in). HTTP transports bind loopback by
+default and warn if exposed.
 
 ## A2A
 
 Both directions use the official **`a2a-sdk`**. `artemis a2a` serves the agent
 card at `/.well-known/agent-card.json` and JSON-RPC at `/`. The executor uses the
-SDK's **task-based** flow: it enqueues a `Task`, then drives it `submitted →
-working → completed` (or `failed`), carrying the reply as an artifact. Tasks are
-persisted in libSQL through `LibSQLTaskStore` (the `a2a_tasks` table), so task
-state, history and artifacts survive restarts and are queryable via `tasks/get`
-and `ListTasks`. The outbound client resolves the peer's card and calls
-`message/send` through the SDK.
+SDK's **task-based** flow (`submitted → working → completed`/`failed`) with the
+reply as an artifact; tasks persist in libSQL (`a2a_tasks`), so they survive
+restarts and are queryable via `tasks/get`/`ListTasks`. The outbound client
+resolves the peer's card and calls `message/send`.
 
-## Durability
+## Durability & scheduling
 
-Long/background work runs on **DBOS Transact** — lightweight durable execution
-backed by a local SQLite *system database* (`$ARTEMIS_HOME/dbos.sqlite`), with
-**no separate server** (unlike Temporal). Workflows are checkpointed: after a
-crash or restart, completed steps are not repeated and the run resumes.
+Long/background work runs on **DBOS Transact** on a local SQLite system DB — no
+server. Workflows are checkpointed and steps retry with backoff.
 
 | Kind | API | CLI |
 | --- | --- | --- |
-| Agent turn | `durability.run_turn` / `agent_turn` | `artemis job-turn` |
-| Report job | `durability.run_report_job` / `report_job` | `artemis job-report` |
-| Background queue | `enqueue_turn` / `enqueue_report_job` (`artemis` queue) | `artemis worker` |
-| Cron / one-off schedule | `durability.schedule_report` (→ `agentkit.scheduler`) | `artemis schedule-add-report` |
+| Agent turn | `durability.run_turn` | `artemis job-turn` |
+| Report job | `durability.run_report_job` | `artemis job-report` |
+| Background queue | `enqueue_*` | `artemis worker` |
+| Cron / one-off schedule | `durability.schedule_report` → `agentkit.scheduler` | `artemis schedule-add-report` |
+| Workflow management | `durability.list_workflows`/`cancel`/`resume` | `artemis workflows` |
 
 ```bash
-# recurring
 artemis schedule-add-report --name weekly --cron "0 8 * * 1" --period last-month --pdf
-# one-off (fires once at/after the time, then auto-disables)
 artemis schedule-add-report --name reminder --at 2026-11-01T09:00 --period last-month
-artemis schedule-list
-artemis worker      # executes queued jobs and the minute scheduler tick; survives restarts
+artemis worker        # executes the queue + the minute scheduler tick
 ```
 
-Scheduling (recurring **and** one-off) is provided by `agentkit.scheduler`:
-jobs live in the database and a DBOS tick fires them with a deterministic
-workflow id, so each run happens exactly once across restarts. Steps retry with
-backoff (`_step_run_agent` uses `retries_allowed`, 3 attempts).
+## Persona (`SOUL.md`)
 
-## Deployment
+The agent's identity/behaviour lives in Markdown, composed with the routing
+instructions — edit the persona without touching code.
 
-Local-first. `Dockerfile` + `docker-compose.yml` (state in `./data`), plus
-`deploy/artemis-bot.service` (systemd) and `deploy/com.artemis.bot.plist`
-(launchd). See `deploy/README.md`. The A2A server exposes `GET /healthz`
-(database check) for probes.
+```bash
+artemis soul          # show the active persona
+artemis soul --init   # scaffold a SOUL.md
+```
 
-Outbound, the orchestrator can call peers from `PEERS_FILE`:
+## Observability
 
-```json
-{ "peers": { "research": { "url": "http://127.0.0.1:9100", "token": "" } } }
+**On by default** with a local **Arize Phoenix** UI (self-hosted, no account);
+`console` and `otlp` (Jaeger/Tempo/Langfuse/collector) are available, and the
+mode falls back to console when Phoenix isn't installed.
+
+```bash
+artemis up                                 # launches Phoenix (localhost:6006)
+OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces artemis up
 ```
 
 ## Data model & money rules
 
 `owners, accounts, categories, merchant_rules, transactions, budgets, goals,
 goal_contributions, holdings, price_snapshots, conversations, messages,
-a2a_tasks`. Schema is versioned with **Alembic** (`alembic/` + `artemis db
-upgrade`); `bootstrap()` uses `create_all` for tests and first run. Transactions store `amount_minor` (signed int: negative = spend)
-plus `currency`. Parsing is `str → Decimal → int`; formatting is
-`int → Decimal → str`. Per-transaction currency; reports group by currency with
-no FX conversion.
+a2a_tasks, scheduled_jobs, usage_records, audit_log`. Schema is versioned with
+**Alembic** (`artemis db upgrade`).
+
+Transactions store `amount_minor` (signed int: negative = spend) + `currency`.
+Parsing is `str → Decimal → int`; formatting is `int → Decimal → str`
+(Babel/CLDR). Per-transaction currency; no FX conversion.
 
 ## Security
 
 - Loopback-only MCP/A2A binds by default (with an exposure warning).
-- Read-only MCP server; no writes exposed.
+- Bulk/destructive tools require approval; no writes exposed over MCP by default.
 - Imported CSV, MCP resource text and remote replies are passed as **data**, not
-  instructions.
-- No secrets or raw amounts are logged.
+  instructions (prompt-injection scanning + untrusted wrapping available).
+- Structured logs **redact** secrets and amounts; all writes are **audited**.
+
+## Deployment
+
+`Dockerfile` + `docker-compose.yml` (state in `./data`), plus
+`deploy/artemis-bot.service` (systemd) and `deploy/com.artemis.bot.plist`
+(launchd). See `deploy/README.md`. The A2A server exposes `GET /healthz` and
+`GET /readyz` for probes.
 
 ## Development
 
 ```bash
-uv run pytest                      # unit tests (in-process, no network)
-uv run pytest -m integration       # real apollo stdio round-trip (self-skips)
+uv run pytest            # 120 tests
 uv run ruff check src tests
-bash tests/smoke.sh                # CLI end-to-end in a temp HOME
-uv run python tests/mcp_smoke.py   # in-process MCP server round-trip
-uv run python tests/soak.py 200    # durable-turn soak (no network/cost)
+uv run mypy src/artemis
+bash tests/smoke.sh      # CLI end-to-end in a temp HOME
+uv run python tests/soak.py 200   # durable-turn soak (no network/cost)
 ```
 
-Layout: `src/artemis/{config,cli,render,guardrails}.py`,
-`domain/` (money, categorizer, imports, reports), `db/` (engine, models,
-migrations, repos), `agents/` (orchestrator + six specialists), `services/`
-(runtime, ledger, session), `prices/`, `mcp/` (client registry + server),
-`a2a/` (client + server), `gateways/telegram_bot.py`.
+Layout: `src/artemis/{config,cli,render,guardrails,soul,observability}.py`,
+`domain/` (money, categorizer, imports, reports), `db/`, `agents/`
+(orchestrator + six specialists), `services/`, `prices/`, `mcp/`, `a2a/`,
+`gateways/`.
 
 ## License
 
