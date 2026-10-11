@@ -1,5 +1,12 @@
 """Observability wiring (re-exported from agentkit)."""
 
-from agentkit.observability import setup_logfire
+from agentkit.logging import get_logger, request_context, setup_logging
+from agentkit.observability import setup_logfire, setup_observability
 
-__all__ = ["setup_logfire"]
+__all__ = [
+    "setup_observability",
+    "setup_logfire",
+    "setup_logging",
+    "get_logger",
+    "request_context",
+]

@@ -42,6 +42,9 @@ domain layered on top.
   SQLite system DB **and** A2A tasks persisted in libSQL (survive restarts);
   model timeouts, SDK retries, optional per-run usage caps, and optional
   Logfire/OTel instrumentation.
+- **Operational**: structured JSON logs with correlation ids and redaction,
+  per-turn token accounting, a hash-chained **audit log**, readiness (`/readyz`)
+  and graceful shutdown — all via agentkit.
 - **MCP both ways**: consumes `apollo-charting` + `apollo-pdf-creator`, and
   serves a **full-agent** MCP server plus typed read-only tools.
 - **A2A both ways**: publishes an agent card + JSON-RPC server; the orchestrator
@@ -70,9 +73,9 @@ automatically.
 | `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
 | `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Per-request timeout and SDK retries. |
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Optional per-run caps. |
-| `OBSERVABILITY` | `off` | `off` \| `console` (local) \| `otlp` (local backend) \| `logfire` (cloud free tier). |
-| `OTLP_ENDPOINT` | – | OTLP endpoint for `observability=otlp`. |
-| `LOGFIRE_TOKEN` | – | Token for `observability=logfire` (also enables cloud if set). |
+| `OBSERVABILITY` | `off` | `off` \| `console` (local) \| `otlp` (self-hosted backend). No account. |
+| `OTLP_ENDPOINT` | – | OTLP endpoint for `observability=otlp` (Phoenix/Jaeger/Tempo/Langfuse). |
+| `LOG_JSON` | `false` | Emit structured JSON logs with correlation ids. |
 | `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports. |
 | `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The single owner. |
 | `LIBSQL_URL` | local file under `ARTEMIS_HOME` | `sqlite+libsql:///…` or Turso. |

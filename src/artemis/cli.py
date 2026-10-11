@@ -482,9 +482,11 @@ def schedule_remove(name: str = typer.Argument(...)) -> None:
 
 
 def main() -> None:
-    from artemis.observability import setup_logfire
+    from artemis.observability import setup_logging, setup_observability
 
-    setup_logfire()
+    settings = get_settings()
+    setup_logging(settings)
+    setup_observability(settings)
     app()
 
 

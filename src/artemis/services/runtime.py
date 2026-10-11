@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agentkit.runtime import Runtime as _BaseRuntime
 from agentkit.runtime import repositories as _agentkit_repositories
 from sqlalchemy import Engine
 
@@ -22,7 +23,9 @@ from artemis.prices.yfinance_source import YFinancePriceSource, yfinance_availab
 
 
 @dataclass
-class Runtime:
+class Runtime(_BaseRuntime):
+    """agentkit runtime bound to Artemis settings and repositories."""
+
     settings: Settings
     engine: Engine
     session_factory: object

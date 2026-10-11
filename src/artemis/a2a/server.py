@@ -19,9 +19,8 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import TaskUpdater
 from agentkit.a2a.task_store import SQLAlchemyTaskStore
+from agentkit.health import db_check, health_routes
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
-from starlette.routing import Route
 
 from artemis.a2a.client import A2AClient, build_a2a_client
 from artemis.config import Settings, build_model
@@ -155,16 +154,8 @@ def build_app(
         task_store=SQLAlchemyTaskStore(runtime),
         agent_card=card,
     )
-    async def healthz(request: Any) -> JSONResponse:
-        try:
-            with repositories(runtime) as repos:
-                repos.transactions.count()
-        except Exception as exc:  # pragma: no cover - defensive
-            return JSONResponse({"status": "error", "db": str(exc)}, status_code=503)
-        return JSONResponse({"status": "ok", "db": "ok"})
-
     routes = (
-        [Route("/healthz", healthz)]
+        health_routes([db_check(runtime)])
         + create_agent_card_routes(card)
         + create_jsonrpc_routes(handler, "/")
     )

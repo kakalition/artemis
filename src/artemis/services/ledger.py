@@ -71,7 +71,7 @@ def record_transaction(
         resolved = apply_rules(deps, normalized_merchant, description)
 
     account = deps.repos.accounts.get_or_create_default(currency=currency)
-    return deps.repos.transactions.add(
+    txn = deps.repos.transactions.add(
         posted_at=parse_date(posted_at),
         amount_minor=amount_minor,
         currency=currency,
@@ -82,6 +82,17 @@ def record_transaction(
         source=source,
         external_id=external_id,
     )
+    deps.repos.audit.append(
+        "transaction.create",
+        target=f"transaction:{txn.id}",
+        detail={
+            "amount_minor": amount_minor,
+            "currency": currency,
+            "source": source,
+        },
+        actor=deps.owner_id,
+    )
+    return txn
 
 
 def set_category(
@@ -160,6 +171,12 @@ def import_csv(
             )
         )
     inserted, skipped = deps.repos.transactions.bulk_add(rows)
+    deps.repos.audit.append(
+        "transactions.import",
+        target="transactions",
+        detail={"inserted": len(inserted), "skipped": skipped, "rows": len(result.rows)},
+        actor=deps.owner_id,
+    )
     return ImportSummary(
         inserted=len(inserted),
         skipped=skipped,

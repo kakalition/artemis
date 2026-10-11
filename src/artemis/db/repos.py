@@ -12,6 +12,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
+from agentkit.db.repositories import AuditRepo, UsageRepo
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -627,3 +628,5 @@ class Repositories:
         self.conversations = ConversationRepo(self.session, self.owner_id)
         self.messages = MessageRepo(self.session, self.owner_id)
         self.a2a = A2ATaskRepo(self.session, self.owner_id)
+        self.usage = UsageRepo(self.session, self.owner_id)
+        self.audit = AuditRepo(self.session, self.owner_id)
