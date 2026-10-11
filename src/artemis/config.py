@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     model_name: str = "openai:gpt-4o-mini"
+    # Transport resilience: per-request timeout and SDK-level retries.
+    model_timeout: float = 60.0
+    model_retries: int = 2
+    # Optional per-run usage caps (None = unlimited).
+    usage_request_limit: int | None = None
+    usage_total_tokens_limit: int | None = None
+    # Optional Logfire/OpenTelemetry token; when set, pydantic-ai is instrumented.
+    logfire_token: str | None = None
+
+    # --- imports --------------------------------------------------------
+    max_import_bytes: int = 5_000_000
 
     # --- storage --------------------------------------------------------
     libsql_url: str | None = None
@@ -134,17 +145,43 @@ def build_model(settings: Settings | None = None):
     """Build the PydanticAI model, pointing at the OpenAI-compatible gateway.
 
     Dev/test keeps the default OpenAI provider but redirects ``base_url`` at the
-    CommandCode gateway when ``OPENAI_BASE_URL`` is set.
+    CommandCode gateway when ``OPENAI_BASE_URL`` is set. Transport retries and
+    the per-request timeout are handled by the underlying async OpenAI client.
     """
+    from openai import AsyncOpenAI
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
 
     settings = settings or get_settings()
-    provider = OpenAIProvider(
+    client = AsyncOpenAI(
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
+        timeout=settings.model_timeout,
+        max_retries=settings.model_retries,
     )
+    provider = OpenAIProvider(openai_client=client)
     model_name = settings.model_name
     if model_name.startswith("openai:"):
         model_name = model_name.split(":", 1)[1]
     return OpenAIChatModel(model_name, provider=provider)
+
+
+def model_settings(settings: Settings | None = None):
+    """Per-request model settings (timeout)."""
+    from pydantic_ai.settings import ModelSettings
+
+    settings = settings or get_settings()
+    return ModelSettings(timeout=settings.model_timeout)
+
+
+def usage_limits(settings: Settings | None = None):
+    """Per-run usage caps, or ``None`` when unlimited."""
+    from pydantic_ai.usage import UsageLimits
+
+    settings = settings or get_settings()
+    if settings.usage_request_limit is None and settings.usage_total_tokens_limit is None:
+        return None
+    return UsageLimits(
+        request_limit=settings.usage_request_limit,
+        total_tokens_limit=settings.usage_total_tokens_limit,
+    )

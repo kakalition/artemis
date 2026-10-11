@@ -115,6 +115,11 @@ def import_csv(
     account_name: str | None = None,
 ) -> ImportSummary:
     """Parse CSV text and insert new, deduplicated transactions."""
+    size = len(text.encode("utf-8"))
+    if size > deps.settings.max_import_bytes:
+        raise ValueError(
+            f"CSV is too large ({size} bytes > {deps.settings.max_import_bytes} limit)"
+        )
     result = parse_csv(
         text,
         default_currency=default_currency,

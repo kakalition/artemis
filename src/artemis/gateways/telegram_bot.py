@@ -175,6 +175,7 @@ async def handle_message(
     bot: Bot,
     chat_id: int,
     text: str,
+    model: Any = None,
 ) -> None:
     """Run one chat turn and deliver the reply plus any artifacts."""
     from artemis.a2a.client import build_a2a_client
@@ -184,7 +185,7 @@ async def handle_message(
         deps = build_deps(
             runtime,
             repos,
-            model=build_model(runtime.settings),
+            model=model or build_model(runtime.settings),
             mcp=registry,
             a2a=build_a2a_client(runtime.settings),
             approve=lambda requests: broker.ask(bot, chat_id, requests),

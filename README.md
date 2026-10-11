@@ -31,8 +31,11 @@ server), **Babel** (currency precision/formatting), **python-dateutil** (dates),
 - **Human-in-the-loop**: bulk (`import_transactions`) and destructive
   (`delete_transaction`) tools pause for approval — a CLI prompt or Telegram
   inline buttons — via PydanticAI deferred tools.
+- **Durable & resilient**: DBOS durable workflows/queues/schedules on a local
+  SQLite system DB; model timeouts, SDK retries, optional per-run usage caps,
+  and optional Logfire/OTel instrumentation.
 - **MCP both ways**: consumes `apollo-charting` + `apollo-pdf-creator`, and
-  serves a **read-only** finance MCP server.
+  serves a **full-agent** MCP server plus typed read-only tools.
 - **A2A both ways**: publishes an agent card + JSON-RPC server; the orchestrator
   can call configured remote agents.
 
@@ -57,6 +60,10 @@ automatically.
 | `OPENAI_API_KEY` | – | Model credential. |
 | `OPENAI_BASE_URL` | – | Point at any OpenAI-compatible gateway. |
 | `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
+| `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Per-request timeout and SDK retries. |
+| `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Optional per-run caps. |
+| `LOGFIRE_TOKEN` | – | Enables Logfire/OTel instrumentation. |
+| `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports. |
 | `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The single owner. |
 | `LIBSQL_URL` | local file under `ARTEMIS_HOME` | `sqlite+libsql:///…` or Turso. |
 | `LIBSQL_AUTH_TOKEN` | – | Turso auth token. |
@@ -85,6 +92,15 @@ artemis portfolio --price AAPL --value 160
 artemis bot                                    # Telegram long-polling
 artemis mcp [--transport stdio|streamable-http|sse]
 artemis a2a                                    # A2A server
+artemis worker                                 # durable worker (queues + cron schedules)
+artemis job-report --period last-month [--chart --pdf] [--enqueue]
+artemis job-turn "how much did I spend this month?"
+artemis schedule-add-report --name weekly --cron "0 8 * * 1" --period last-month
+artemis schedule-list
+artemis backup ~/artemis-backup.db             # copy the local database
+artemis export --out transactions.json --format json
+artemis db upgrade                             # apply Alembic migrations
+artemis db revision -m "add something"         # autogenerate a migration
 ```
 
 `report --chart/--pdf` renders artifacts through the MCP servers **without** an
@@ -158,8 +174,38 @@ card at `/.well-known/agent-card.json` and JSON-RPC at `/`; an
 `AgentExecutor` answers with a single agent `Message` (the SDK's immediate-
 response workflow) whose text comes from the orchestrator, so replies are
 verbatim. Tasks are kept in the SDK's in-memory store (they do not survive
-restarts); a persistent `TaskStore` is the durability upgrade. The outbound
-client resolves the peer's card and calls `message/send` through the SDK.
+restarts); the A2A executor answers with an immediate **Message** (no Task
+lifecycle), so durability is provided by the DBOS layer below rather than a task
+store. The outbound client resolves the peer's card and calls `message/send`
+through the SDK.
+
+## Durability
+
+Long/background work runs on **DBOS Transact** — lightweight durable execution
+backed by a local SQLite *system database* (`$ARTEMIS_HOME/dbos.sqlite`), with
+**no separate server** (unlike Temporal). Workflows are checkpointed: after a
+crash or restart, completed steps are not repeated and the run resumes.
+
+| Kind | API | CLI |
+| --- | --- | --- |
+| Agent turn | `durability.run_turn` / `agent_turn` | `artemis job-turn` |
+| Report job | `durability.run_report_job` / `report_job` | `artemis job-report` |
+| Background queue | `enqueue_turn` / `enqueue_report_job` (`artemis` queue) | `artemis worker` |
+| Cron schedule | `apply_report_schedule` | `artemis schedule-add-report` |
+
+```bash
+artemis schedule-add-report --name weekly --cron "0 8 * * 1" --period last-month --pdf
+artemis worker      # executes queued jobs and the schedule; survives restarts
+```
+
+Steps retry with backoff (`_step_run_agent` uses `retries_allowed`, 3 attempts).
+
+## Deployment
+
+Local-first. `Dockerfile` + `docker-compose.yml` (state in `./data`), plus
+`deploy/artemis-bot.service` (systemd) and `deploy/com.artemis.bot.plist`
+(launchd). See `deploy/README.md`. The A2A server exposes `GET /healthz`
+(database check) for probes.
 
 Outbound, the orchestrator can call peers from `PEERS_FILE`:
 
@@ -171,7 +217,8 @@ Outbound, the orchestrator can call peers from `PEERS_FILE`:
 
 `owners, accounts, categories, merchant_rules, transactions, budgets, goals,
 goal_contributions, holdings, price_snapshots, conversations, messages,
-a2a_tasks`. Transactions store `amount_minor` (signed int: negative = spend)
+a2a_tasks`. Schema is versioned with **Alembic** (`alembic/` + `artemis db
+upgrade`); `bootstrap()` uses `create_all` for tests and first run. Transactions store `amount_minor` (signed int: negative = spend)
 plus `currency`. Parsing is `str → Decimal → int`; formatting is
 `int → Decimal → str`. Per-transaction currency; reports group by currency with
 no FX conversion.
@@ -191,7 +238,8 @@ uv run pytest                      # unit tests (in-process, no network)
 uv run pytest -m integration       # real apollo stdio round-trip (self-skips)
 uv run ruff check src tests
 bash tests/smoke.sh                # CLI end-to-end in a temp HOME
-uv run python tests/mcp_smoke.py   # in-process read-only MCP server round-trip
+uv run python tests/mcp_smoke.py   # in-process MCP server round-trip
+uv run python tests/soak.py 200    # durable-turn soak (no network/cost)
 ```
 
 Layout: `src/artemis/{config,cli,render,guardrails}.py`,

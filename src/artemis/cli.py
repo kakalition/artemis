@@ -93,6 +93,46 @@ def version() -> None:
     typer.echo(f"artemis {__version__}")
 
 
+db_app = typer.Typer(no_args_is_help=True, help="Database migrations (Alembic).")
+app.add_typer(db_app, name="db")
+
+
+def _alembic_config():
+    from alembic.config import Config as AlembicConfig
+
+    root = Path(__file__).resolve().parents[2]
+    cfg = AlembicConfig(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+    return cfg
+
+
+@db_app.command("upgrade")
+def db_upgrade(revision: str = typer.Argument("head")) -> None:
+    """Apply migrations up to REVISION (default: head)."""
+    from alembic import command
+
+    command.upgrade(_alembic_config(), revision)
+    typer.echo(f"database migrated to {revision}")
+
+
+@db_app.command("current")
+def db_current() -> None:
+    """Show the current migration revision."""
+    from alembic import command
+
+    command.current(_alembic_config())
+
+
+@db_app.command("revision")
+def db_revision(message: str = typer.Option(..., "-m", "--message")) -> None:
+    """Autogenerate a new migration from the current models."""
+    from alembic import command
+
+    command.revision(_alembic_config(), message=message, autogenerate=True)
+    typer.echo("revision created")
+
+
 @app.command()
 def chat(
     conv: str = typer.Option("cli:default", help="Conversation id."),
@@ -159,9 +199,13 @@ def import_command(
             for warning in parsed.warnings:
                 typer.echo(f"  ! {warning}")
             return
-        summary = ledger.import_csv(
-            deps, text=text, default_currency=currency, dayfirst=dayfirst
-        )
+        try:
+            summary = ledger.import_csv(
+                deps, text=text, default_currency=currency, dayfirst=dayfirst
+            )
+        except ValueError as exc:
+            typer.echo(f"import failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
     typer.echo(
         f"imported {summary.inserted} transactions "
         f"({summary.skipped} duplicates skipped, {summary.total_rows} rows)"
@@ -252,6 +296,60 @@ def portfolio(
 
 
 @app.command()
+def backup(out: Path = typer.Argument(..., dir_okay=False)) -> None:
+    """Back up the local database file to OUT."""
+    settings = get_settings()
+    if settings.libsql_url and not settings.libsql_url.startswith("sqlite"):
+        typer.echo("backup supports only the local SQLite/libSQL file", err=True)
+        raise typer.Exit(code=1)
+    source = settings.db_path
+    if not source.exists():
+        typer.echo(f"no database at {source}", err=True)
+        raise typer.Exit(code=1)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, out)
+    typer.echo(f"backed up {source} -> {out}")
+
+
+@app.command("export")
+def export_data(
+    out: Path = typer.Option(..., "--out", dir_okay=False),
+    format: str = typer.Option("csv", "--format", help="csv or json"),
+) -> None:
+    """Export all transactions to CSV or JSON."""
+    import csv as _csv
+    import json as _json
+
+    runtime = build_runtime()
+    with repositories(runtime) as repos:
+        categories = {c.id: c.name for c in repos.categories.list()}
+        records = [
+            {
+                "id": row.id,
+                "posted_at": row.posted_at.isoformat(),
+                "amount_minor": row.amount_minor,
+                "currency": row.currency,
+                "description": row.description,
+                "merchant": row.merchant,
+                "category": categories.get(row.category_id),
+                "source": row.source,
+                "external_id": row.external_id,
+            }
+            for row in repos.transactions.list()
+        ]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if format == "json":
+        out.write_text(_json.dumps(records, indent=2), encoding="utf-8")
+    else:
+        fieldnames = list(records[0].keys()) if records else ["id"]
+        with out.open("w", newline="", encoding="utf-8") as handle:
+            writer = _csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(records)
+    typer.echo(f"exported {len(records)} transactions -> {out}")
+
+
+@app.command()
 def bot() -> None:
     """Run the Telegram bot (long-polling)."""
     from artemis.gateways.telegram_bot import run_bot
@@ -279,7 +377,103 @@ def a2a() -> None:
     serve(get_settings())
 
 
+@app.command()
+def worker() -> None:
+    """Run the durable worker (DBOS queues + cron schedules)."""
+    import time
+
+    from artemis import durability
+
+    settings = get_settings()
+    durability.init(settings)
+    typer.echo("Artemis worker running (durable queues + schedules). Ctrl-C to stop.")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:  # pragma: no cover
+        typer.echo("worker stopped")
+
+
+@app.command("job-report")
+def job_report(
+    period: str = typer.Option("this-month", help="A month (2026-01) or keyword."),
+    chart: bool = typer.Option(False, "--chart"),
+    pdf: bool = typer.Option(False, "--pdf"),
+    enqueue: bool = typer.Option(False, "--enqueue", help="Queue and return instead of waiting."),
+) -> None:
+    """Run a durable spending-report job (survives restarts)."""
+    from artemis import durability
+
+    settings = get_settings()
+    if enqueue:
+        workflow_id = durability.enqueue_report_job(
+            period, chart=chart, pdf=pdf, settings=settings
+        )
+        typer.echo(f"queued report job: {workflow_id}")
+        return
+    result = durability.run_report_job(period, chart=chart, pdf=pdf)
+    typer.echo(result["text"])
+    for artifact in result["artifacts"]:
+        typer.echo(f"{artifact['kind']}: {artifact['path']}")
+
+
+@app.command("job-turn")
+def job_turn(
+    text: str = typer.Argument(..., help="Prompt for the agent."),
+    conversation_id: str = typer.Option("cli:durable", help="Conversation id."),
+) -> None:
+    """Run a durable agent turn (checkpointed; resumable across restarts)."""
+    from artemis import durability
+
+    result = durability.run_turn(text, conversation_id=conversation_id, settings=get_settings())
+    typer.echo(result["output"])
+    for artifact in result["artifacts"]:
+        typer.echo(f"  [{artifact['kind']}] {artifact['path']}")
+
+
+@app.command("schedule-list")
+def schedule_list() -> None:
+    """List durable cron schedules."""
+    from artemis import durability
+
+    durability.init(get_settings())
+    schedules = durability.list_schedules()
+    if not schedules:
+        typer.echo("no schedules")
+        return
+    for schedule in schedules:
+        typer.echo(f"{schedule['name']}: {schedule['cron']} ({schedule['timezone'] or 'local'})")
+
+
+@app.command("schedule-add-report")
+def schedule_add_report(
+    name: str = typer.Option(..., "--name", help="Schedule name."),
+    cron: str = typer.Option(..., "--cron", help="Cron expression, e.g. '0 8 * * 1'."),
+    period: str = typer.Option("last-month", help="Report period."),
+    chart: bool = typer.Option(False, "--chart"),
+    pdf: bool = typer.Option(False, "--pdf"),
+    timezone: str | None = typer.Option(None, help="IANA timezone for the cron."),
+) -> None:
+    """Add a durable cron schedule that runs a spending-report job."""
+    from artemis import durability
+
+    settings = get_settings()
+    durability.apply_report_schedule(
+        schedule_name=name,
+        cron=cron,
+        period=period,
+        chart=chart,
+        pdf=pdf,
+        timezone=timezone,
+        settings=settings,
+    )
+    typer.echo(f"schedule '{name}' registered ({cron}); run 'artemis worker' to execute it")
+
+
 def main() -> None:
+    from artemis.observability import setup_logfire
+
+    setup_logfire()
     app()
 
 

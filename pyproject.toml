@@ -22,10 +22,13 @@ dependencies = [
     "telegramify-markdown>=1.4.0",
     "python-dateutil>=2.9.0.post0",
     "babel>=2.18.0",
+    "alembic>=1.20.0",
+    "dbos>=3.2.0",
 ]
 
 [project.optional-dependencies]
 prices = ["yfinance>=0.2.50"]
+observability = ["logfire>=3"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
@@ -47,6 +50,8 @@ packages = ["src/artemis"]
 line-length = 100
 target-version = "py311"
 src = ["src"]
+# Alembic-generated revisions use its own boilerplate style.
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

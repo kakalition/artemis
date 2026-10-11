@@ -1,0 +1,17 @@
+# Local deployment. Copy .env.example to .env first.
+# The DB, artifacts and DBOS system database live under /data (bind-mounted).
+services:
+  artemis:
+    build: .
+    env_file:
+      - .env
+    environment:
+      ARTEMIS_HOME: /data
+    volumes:
+      - ./data:/data
+      # If you use report charts/PDFs, mount the apollo MCP servers too, e.g.:
+      # - ${HOME}/Workspaces/agent-mcps:/agent-mcps:ro
+      # and set CHARTING_DIR=/agent-mcps/apollo-charting
+      #            PDF_DIR=/agent-mcps/apollo-pdf-creator
+    command: ["bot"] # bot | a2a | worker | chat
+    restart: unless-stopped

@@ -15,6 +15,7 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 from artemis.agents.deps import Deps
+from artemis.config import model_settings, usage_limits
 from artemis.db.repos import Repositories
 
 DEFAULT_MAX_HISTORY = 40
@@ -88,6 +89,8 @@ class ChatRunner:
             deps=self.deps,
             message_history=history,
             model=self.deps.model,
+            model_settings=model_settings(self.deps.settings),
+            usage_limits=usage_limits(self.deps.settings),
         )
         all_messages = result.all_messages()
         save_new_messages(repos, self.conversation_id, all_messages, start_index=len(history))
