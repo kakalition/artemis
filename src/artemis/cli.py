@@ -473,20 +473,28 @@ def workflows(
     """Inspect and manage durable (DBOS) workflows."""
     from artemis import durability
 
-    db = durability.client(get_settings())
-    if cancel:
-        db.cancel_workflow(cancel)
-        typer.echo(f"cancelled {cancel}")
-        return
-    if resume:
-        db.resume_workflow(resume)
-        typer.echo(f"resumed {resume}")
-        return
-    if show:
-        wf = db.retrieve_workflow(show).get_status()
-        typer.echo(f"{wf.workflow_id}  {wf.status}  {wf.name}  queue={wf.queue_name}")
-        return
-    rows = db.list_workflows(status=status, limit=limit, sort_desc=True)
+    try:
+        db = durability.client(get_settings())
+        if cancel:
+            db.cancel_workflow(cancel)
+            typer.echo(f"cancelled {cancel}")
+            return
+        if resume:
+            db.resume_workflow(resume)
+            typer.echo(f"resumed {resume}")
+            return
+        if show:
+            wf = db.retrieve_workflow(show).get_status()
+            typer.echo(f"{wf.workflow_id}  {wf.status}  {wf.name}  queue={wf.queue_name}")
+            return
+        rows = db.list_workflows(status=status, limit=limit, sort_desc=True)
+    except Exception as exc:  # no such table yet, or DBOS DB missing
+        typer.echo(
+            f"no durable workflows yet ({type(exc).__name__}); "
+            "run a durable command first, e.g. 'artemis up' or 'artemis job-report'",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
     if not rows:
         typer.echo("no workflows")
         return

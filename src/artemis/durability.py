@@ -22,7 +22,6 @@ from agentkit import scheduler
 from agentkit.durability import (  # noqa: F401  (re-exported DBOS surface)
     cancel_workflow,
     client,
-    get_event,
     get_workflow,
     list_workflows,
     resume_workflow,

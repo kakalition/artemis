@@ -49,6 +49,14 @@ def test_up_with_nothing_enabled(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_workflows_empty_is_friendly(tmp_path, monkeypatch):
+    runner = _prepare(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["workflows"])
+    assert result.exit_code == 1
+    assert "no durable workflows" in result.output
+    get_settings.cache_clear()
+
+
 def test_overlarge_import_fails(tmp_path, monkeypatch):
     runner = _prepare(tmp_path, monkeypatch)
     monkeypatch.setenv("MAX_IMPORT_BYTES", "10")
