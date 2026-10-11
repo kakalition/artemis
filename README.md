@@ -76,7 +76,7 @@ automatically.
 | `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
 | `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Per-request timeout and SDK retries. |
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Optional per-run caps. |
-| `OBSERVABILITY` | `off` | `off` \| `console` (local) \| `otlp` (self-hosted backend). No account. |
+| `OBSERVABILITY` | `console` | `console` \| `otlp` \| `phoenix` \| `off`. Self-hosted, no account. |
 | `OTLP_ENDPOINT` | – | OTLP endpoint for `observability=otlp` (Phoenix/Jaeger/Tempo/Langfuse). |
 | `LOG_JSON` | `false` | Emit structured JSON logs with correlation ids. |
 | `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports. |
