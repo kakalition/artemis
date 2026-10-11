@@ -42,6 +42,9 @@ domain layered on top.
   SQLite system DB **and** A2A tasks persisted in libSQL (survive restarts);
   model timeouts, SDK retries, optional per-run usage caps, and optional
   Logfire/OTel instrumentation.
+- **Persona `SOUL.md`**: the agent's identity and behaviour live in a Markdown
+  file (project root or `$ARTEMIS_HOME`), composed with the routing
+  instructions — edit the persona without touching code (`artemis soul`).
 - **Operational**: structured JSON logs with correlation ids and redaction,
   per-turn token accounting, a hash-chained **audit log**, readiness (`/readyz`)
   and graceful shutdown — all via agentkit.
@@ -116,6 +119,9 @@ artemis backup ~/artemis-backup.db             # copy the local database
 artemis export --out transactions.json --format json
 artemis db upgrade                             # apply Alembic migrations
 artemis db revision -m "add something"         # autogenerate a migration
+artemis soul                                   # show the active persona
+artemis soul --init                            # scaffold a SOUL.md
+artemis up                                     # run everything: worker + A2A + MCP + bot
 ```
 
 `report --chart/--pdf` renders artifacts through the MCP servers **without** an

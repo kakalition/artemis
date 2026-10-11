@@ -12,10 +12,11 @@ from artemis.agents.insights import insights_agent
 from artemis.agents.portfolio import portfolio_agent
 from artemis.agents.prompts import ORCHESTRATOR_INSTRUCTIONS
 from artemis.agents.transactions import transactions_agent
+from artemis.soul import compose_instructions, load_soul
 
 _orchestrator = Orchestrator(
     name="artemis",
-    instructions=ORCHESTRATOR_INSTRUCTIONS,
+    instructions=compose_instructions(load_soul(), ORCHESTRATOR_INSTRUCTIONS),
     deps_type=Deps,
 )
 

@@ -134,6 +134,22 @@ def db_revision(message: str = typer.Option(..., "-m", "--message")) -> None:
 
 
 @app.command()
+def soul(
+    init: bool = typer.Option(False, "--init", help="Write a default SOUL.md if missing."),
+) -> None:
+    """Show the active SOUL.md persona (or scaffold one with --init)."""
+    from artemis.soul import ensure_soul, load_soul, resolve_soul_path
+
+    settings = get_settings()
+    if init:
+        path = ensure_soul(settings)
+        typer.echo(f"wrote {path}")
+        return
+    typer.echo(f"# {resolve_soul_path(settings)}")
+    typer.echo(load_soul(settings))
+
+
+@app.command()
 def chat(
     conv: str = typer.Option("cli:default", help="Conversation id."),
     no_mcp: bool = typer.Option(False, "--no-mcp", help="Do not connect to the apollo MCP servers."),
@@ -395,6 +411,52 @@ def worker() -> None:
             time.sleep(3600)
     except KeyboardInterrupt:  # pragma: no cover
         typer.echo("worker stopped")
+
+
+@app.command()
+def up(
+    a2a: bool = typer.Option(True, "--a2a/--no-a2a", help="Run the A2A server."),
+    mcp: bool = typer.Option(True, "--mcp/--no-mcp", help="Run the MCP HTTP server."),
+    bot: bool = typer.Option(True, "--bot/--no-bot", help="Run the Telegram bot (if configured)."),
+) -> None:
+    """Run the whole stack in one process (worker + A2A + MCP + bot + observability).
+
+    The DBOS worker (queues + scheduler tick) starts automatically; with
+    `OBSERVABILITY=phoenix` a local Arize Phoenix UI is launched too.
+    """
+    from agentkit import scheduler
+    from agentkit.supervise import Service, run_all
+
+    from artemis import durability
+    from artemis.observability import setup_logging, setup_observability
+
+    settings = get_settings()
+    run_bot_enabled = bot and bool(settings.telegram_bot_token)
+    if not (a2a or mcp or run_bot_enabled):
+        typer.echo("nothing to run")
+        return
+
+    setup_logging(settings)
+    setup_observability(settings)
+    durability.init(settings)
+    scheduler.init_scheduler(settings)
+
+    services: list[Service] = []
+    if a2a:
+        from artemis.a2a.server import serve as serve_a2a
+
+        services.append(Service("a2a", lambda: serve_a2a(settings)))
+    if mcp:
+        from artemis.mcp.server import serve as serve_mcp
+
+        services.append(Service("mcp", lambda: serve_mcp(settings, transport="streamable-http")))
+    if run_bot_enabled:
+        from artemis.gateways.telegram_bot import run_bot
+
+        services.append(Service("bot", lambda: run_bot(settings)))
+
+    typer.echo("artemis up: " + ", ".join(service.name for service in services))
+    run_all(services)
 
 
 @app.command("job-report")

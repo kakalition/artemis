@@ -41,6 +41,14 @@ def test_import_export_backup(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_up_with_nothing_enabled(tmp_path, monkeypatch):
+    runner = _prepare(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["up", "--no-a2a", "--no-mcp", "--no-bot"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to run" in result.output
+    get_settings.cache_clear()
+
+
 def test_overlarge_import_fails(tmp_path, monkeypatch):
     runner = _prepare(tmp_path, monkeypatch)
     monkeypatch.setenv("MAX_IMPORT_BYTES", "10")
