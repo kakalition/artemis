@@ -14,11 +14,12 @@ it has completed.
 from __future__ import annotations
 
 import asyncio
-import threading
 from collections.abc import Callable
 from typing import Any
 
-from dbos import DBOS, DBOSConfig, SetWorkflowID
+from agentkit import durability as _durability
+from agentkit import scheduler
+from dbos import DBOS, SetWorkflowID
 
 from artemis.config import Settings, build_model, get_settings, model_settings, usage_limits
 from artemis.domain.reports import SpendingReport, build_spending_report
@@ -29,9 +30,6 @@ from artemis.services.session import load_history, serialize_message
 
 REPORT_QUEUE = "artemis"
 
-_lock = threading.Lock()
-_initialized = False
-_launched = False
 _model_factory: Callable[[Settings], Any] | None = None
 
 
@@ -45,27 +43,9 @@ def _build_model(settings: Settings) -> Any:
     return _model_factory(settings) if _model_factory is not None else build_model(settings)
 
 
-def dbos_config(settings: Settings) -> DBOSConfig:
-    settings.ensure_dirs()
-    return DBOSConfig(
-        name="artemis",
-        system_database_url=f"sqlite:///{settings.artemis_home / 'dbos.sqlite'}",
-    )
-
-
 def init(settings: Settings | None = None, *, launch: bool = True) -> type[DBOS]:
-    """Configure and launch DBOS once per process (idempotent)."""
-    global _initialized, _launched
-    settings = settings or get_settings()
-    with _lock:
-        if not _initialized:
-            DBOS(config=dbos_config(settings))
-            _initialized = True
-        if launch and not _launched:
-            DBOS.launch()
-            DBOS.register_queue(REPORT_QUEUE)
-            _launched = True
-    return DBOS
+    """Configure and launch DBOS once per process (via agentkit)."""
+    return _durability.init(settings or get_settings(), launch=launch, queues=[REPORT_QUEUE])
 
 
 # --------------------------------------------------------------------------
@@ -147,8 +127,7 @@ def enqueue_turn(
 ) -> str:
     """Enqueue a durable agent turn on the background queue; returns the workflow id."""
     init(settings)
-    handle = DBOS.enqueue_workflow(REPORT_QUEUE, agent_turn, conversation_id, text)
-    return handle.get_workflow_id()
+    return _durability.enqueue(REPORT_QUEUE, agent_turn, conversation_id, text)
 
 
 # --------------------------------------------------------------------------
@@ -238,61 +217,49 @@ def enqueue_report_job(
 ) -> str:
     """Queue a durable report job on the background worker; returns its id."""
     init(settings)
-    handle = DBOS.enqueue_workflow(REPORT_QUEUE, report_job, period, currency, chart, pdf)
-    return handle.get_workflow_id()
+    return _durability.enqueue(REPORT_QUEUE, report_job, period, currency, chart, pdf)
 
 
 # --------------------------------------------------------------------------
-# Durable schedules
+# Scheduling (agentkit.scheduler): cron + one-off
 # --------------------------------------------------------------------------
 
 
-def apply_report_schedule(
+@scheduler.task("report")
+def _report_task(
+    period: str = "last-month", chart: bool = False, pdf: bool = False
+) -> None:
+    """Registered scheduler task: run a durable spending-report job."""
+    run_report_job(period, chart=chart, pdf=pdf)
+
+
+def schedule_report(
     *,
-    schedule_name: str,
-    cron: str,
+    name: str,
     period: str = "last-month",
     chart: bool = False,
     pdf: bool = False,
-    timezone: str | None = None,
+    cron: str | None = None,
+    at: str | None = None,
     settings: Settings | None = None,
 ) -> None:
-    """Register a cron schedule that runs a durable report job."""
-    init(settings)
-    DBOS.apply_schedules(
-        [
-            {
-                "schedule_name": schedule_name,
-                "workflow_fn": _scheduled_report,
-                "schedule": cron,
-                "context": {"period": period, "chart": chart, "pdf": pdf},
-                "cron_timezone": timezone,
-            }
-        ]
-    )
+    """Schedule a recurring (``cron``) or one-off (``at`` ISO datetime) report."""
+    settings = settings or get_settings()
+    scheduler.configure(settings)
+    args = {"period": period, "chart": chart, "pdf": pdf}
+    if cron:
+        scheduler.schedule_cron(name, cron, "report", args=args)
+    elif at:
+        scheduler.schedule_once(name, at, "report", args=args)
+    else:
+        raise ValueError("provide either cron= or at=")
 
 
-@DBOS.workflow()
-def _scheduled_report(scheduled_time: Any, context: Any) -> None:
-    context = context or {}
-    report_job(
-        context.get("period", "last-month"),
-        None,
-        bool(context.get("chart")),
-        bool(context.get("pdf")),
-    )
+def list_report_schedules() -> list[dict[str, Any]]:
+    scheduler.configure(get_settings())
+    return scheduler.list_jobs()
 
 
-def _field(schedule: Any, name: str) -> Any:
-    return schedule.get(name) if isinstance(schedule, dict) else getattr(schedule, name, None)
-
-
-def list_schedules() -> list[dict[str, Any]]:
-    return [
-        {
-            "name": _field(schedule, "schedule_name"),
-            "cron": _field(schedule, "schedule"),
-            "timezone": _field(schedule, "cron_timezone"),
-        }
-        for schedule in DBOS.list_schedules()
-    ]
+def remove_report_schedule(name: str) -> bool:
+    scheduler.configure(get_settings())
+    return scheduler.remove_job(name)

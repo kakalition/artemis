@@ -24,7 +24,7 @@ def _runtime(tmp_path) -> Runtime:
     engine = create_db_engine(f"sqlite+libsql:///{tmp_path / 'artemis.db'}")
     bootstrap(engine, "owner", "Owner")
     return Runtime(
-        settings=Settings(owner_id="owner", a2a_public_url=BASE, artemis_home=tmp_path),
+        settings=Settings(owner_id="owner", a2a_public_url=BASE, agent_home=tmp_path),
         engine=engine,
         session_factory=make_session_factory(engine),
     )

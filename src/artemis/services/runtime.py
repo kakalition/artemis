@@ -38,7 +38,7 @@ def build_price_source(settings: Settings) -> PriceSource:
 def build_runtime(settings: Settings | None = None) -> Runtime:
     settings = settings or get_settings()
     settings.ensure_dirs()
-    engine = create_db_engine(settings.database_url, auth_token=settings.libsql_auth_token)
+    engine = create_db_engine(settings.resolved_database_url, auth_token=settings.libsql_auth_token)
     bootstrap(engine, settings.owner_id, settings.owner_name)
     return Runtime(settings=settings, engine=engine, session_factory=make_session_factory(engine))
 

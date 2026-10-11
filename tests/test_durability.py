@@ -54,9 +54,16 @@ def test_durable_report_job(durability):
     assert "Spending report" in result["text"]
 
 
-def test_durable_schedule(durability):
-    durability.apply_report_schedule(
-        schedule_name="weekly-test", cron="0 8 * * 1", period="last-month"
-    )
-    names = {schedule["name"] for schedule in durability.list_schedules()}
-    assert "weekly-test" in names
+def test_durable_cron_schedule(durability):
+    durability.schedule_report(name="weekly-test", cron="0 8 * * 1", period="last-month")
+    jobs = {job["name"]: job for job in durability.list_report_schedules()}
+    assert jobs["weekly-test"]["kind"] == "cron"
+    assert jobs["weekly-test"]["task"] == "report"
+
+
+def test_durable_one_off_schedule(durability):
+    durability.schedule_report(name="once-test", at="2026-12-01T09:00", period="last-month")
+    jobs = {job["name"]: job for job in durability.list_report_schedules()}
+    assert jobs["once-test"]["kind"] == "once"
+    assert jobs["once-test"]["schedule"].startswith("2026-12-01T09:00")
+    assert durability.remove_report_schedule("once-test") is True

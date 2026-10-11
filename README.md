@@ -19,6 +19,13 @@ server), **Babel** (currency precision/formatting), **python-dateutil** (dates),
 **telegramify-markdown** (Telegram rendering), **aiogram**, **Typer**,
 **pydantic-settings**, **SQLModel / SQLAlchemy** over **libSQL**, and **httpx**.
 
+The generic agent plumbing — orchestrator + delegation, deps, HITL approvals,
+session/history, runtime + repositories, DBOS durability, the cron/one-off
+scheduler, the MCP client registry, the A2A server/client + durable task store,
+Telegram/CLI helpers and observability — is factored into
+[**`agentkit`**](https://github.com/kakalition/agentkit). Artemis is the finance
+domain layered on top.
+
 ## Features
 
 - **Six specialists** behind one orchestrator: transactions, budgets, goals,
@@ -99,7 +106,9 @@ artemis worker                                 # durable worker (queues + cron s
 artemis job-report --period last-month [--chart --pdf] [--enqueue]
 artemis job-turn "how much did I spend this month?"
 artemis schedule-add-report --name weekly --cron "0 8 * * 1" --period last-month
+artemis schedule-add-report --name reminder --at 2026-11-01T09:00 --period last-month
 artemis schedule-list
+artemis schedule-remove weekly
 artemis backup ~/artemis-backup.db             # copy the local database
 artemis export --out transactions.json --format json
 artemis db upgrade                             # apply Alembic migrations
@@ -193,14 +202,21 @@ crash or restart, completed steps are not repeated and the run resumes.
 | Agent turn | `durability.run_turn` / `agent_turn` | `artemis job-turn` |
 | Report job | `durability.run_report_job` / `report_job` | `artemis job-report` |
 | Background queue | `enqueue_turn` / `enqueue_report_job` (`artemis` queue) | `artemis worker` |
-| Cron schedule | `apply_report_schedule` | `artemis schedule-add-report` |
+| Cron / one-off schedule | `durability.schedule_report` (→ `agentkit.scheduler`) | `artemis schedule-add-report` |
 
 ```bash
+# recurring
 artemis schedule-add-report --name weekly --cron "0 8 * * 1" --period last-month --pdf
-artemis worker      # executes queued jobs and the schedule; survives restarts
+# one-off (fires once at/after the time, then auto-disables)
+artemis schedule-add-report --name reminder --at 2026-11-01T09:00 --period last-month
+artemis schedule-list
+artemis worker      # executes queued jobs and the minute scheduler tick; survives restarts
 ```
 
-Steps retry with backoff (`_step_run_agent` uses `retries_allowed`, 3 attempts).
+Scheduling (recurring **and** one-off) is provided by `agentkit.scheduler`:
+jobs live in the database and a DBOS tick fires them with a deterministic
+workflow id, so each run happens exactly once across restarts. Steps retry with
+backoff (`_step_run_agent` uses `retries_allowed`, 3 attempts).
 
 ## Deployment
 

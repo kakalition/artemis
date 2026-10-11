@@ -103,7 +103,7 @@ def _alembic_config():
     root = Path(__file__).resolve().parents[2]
     cfg = AlembicConfig(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+    cfg.set_main_option("sqlalchemy.url", get_settings().resolved_database_url)
     return cfg
 
 
@@ -382,10 +382,13 @@ def worker() -> None:
     """Run the durable worker (DBOS queues + cron schedules)."""
     import time
 
+    from agentkit import scheduler
+
     from artemis import durability
 
     settings = get_settings()
-    durability.init(settings)
+    durability.init(settings)  # register the report queue
+    scheduler.init_scheduler(settings)  # register the tick + worker queue
     typer.echo("Artemis worker running (durable queues + schedules). Ctrl-C to stop.")
     try:
         while True:
@@ -433,41 +436,49 @@ def job_turn(
 
 @app.command("schedule-list")
 def schedule_list() -> None:
-    """List durable cron schedules."""
+    """List durable scheduled jobs (cron and one-off)."""
     from artemis import durability
 
-    durability.init(get_settings())
-    schedules = durability.list_schedules()
-    if not schedules:
-        typer.echo("no schedules")
+    jobs = durability.list_report_schedules()
+    if not jobs:
+        typer.echo("no scheduled jobs")
         return
-    for schedule in schedules:
-        typer.echo(f"{schedule['name']}: {schedule['cron']} ({schedule['timezone'] or 'local'})")
+    for job in jobs:
+        state = "on" if job["enabled"] else "off"
+        typer.echo(f"{job['name']} [{job['kind']}/{state}] {job['schedule']} -> {job['task']} {job['args']}")
 
 
 @app.command("schedule-add-report")
 def schedule_add_report(
     name: str = typer.Option(..., "--name", help="Schedule name."),
-    cron: str = typer.Option(..., "--cron", help="Cron expression, e.g. '0 8 * * 1'."),
+    cron: str | None = typer.Option(None, "--cron", help="Cron expression, e.g. '0 8 * * 1'."),
+    at: str | None = typer.Option(None, "--at", help="One-off ISO datetime, e.g. 2026-11-01T09:00."),
     period: str = typer.Option("last-month", help="Report period."),
     chart: bool = typer.Option(False, "--chart"),
     pdf: bool = typer.Option(False, "--pdf"),
-    timezone: str | None = typer.Option(None, help="IANA timezone for the cron."),
 ) -> None:
-    """Add a durable cron schedule that runs a spending-report job."""
+    """Schedule a recurring (--cron) or one-off (--at) spending report."""
     from artemis import durability
 
-    settings = get_settings()
-    durability.apply_report_schedule(
-        schedule_name=name,
-        cron=cron,
-        period=period,
-        chart=chart,
-        pdf=pdf,
-        timezone=timezone,
-        settings=settings,
-    )
-    typer.echo(f"schedule '{name}' registered ({cron}); run 'artemis worker' to execute it")
+    try:
+        durability.schedule_report(
+            name=name, period=period, chart=chart, pdf=pdf, cron=cron, at=at,
+            settings=get_settings(),
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    when = cron or at
+    typer.echo(f"schedule '{name}' registered ({when}); run 'artemis worker' to execute it")
+
+
+@app.command("schedule-remove")
+def schedule_remove(name: str = typer.Argument(...)) -> None:
+    """Remove a scheduled job."""
+    from artemis import durability
+
+    removed = durability.remove_report_schedule(name)
+    typer.echo("removed" if removed else "not found")
 
 
 def main() -> None:

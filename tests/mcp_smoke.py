@@ -26,7 +26,7 @@ async def main() -> None:
     engine = create_db_engine(f"sqlite+libsql:///{home / 'artemis.db'}")
     bootstrap(engine, "owner", "Owner")
     runtime = Runtime(
-        settings=Settings(owner_id="owner", artemis_home=home),
+        settings=Settings(owner_id="owner", agent_home=home),
         engine=engine,
         session_factory=make_session_factory(engine),
     )

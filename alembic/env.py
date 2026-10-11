@@ -29,7 +29,7 @@ def _database_url() -> str:
         return url
     settings = get_settings()
     settings.ensure_dirs()
-    return settings.database_url
+    return settings.resolved_database_url
 
 
 def run_migrations_offline() -> None:

@@ -19,7 +19,7 @@ def test_alembic_upgrade_creates_schema(tmp_path, monkeypatch):
     cfg = _alembic_config()
     command.upgrade(cfg, "head")
 
-    engine = create_db_engine(get_settings().database_url)
+    engine = create_db_engine(get_settings().resolved_database_url)
     tables = set(inspect(engine).get_table_names())
     assert {
         "owners",
@@ -35,6 +35,7 @@ def test_alembic_upgrade_creates_schema(tmp_path, monkeypatch):
         "conversations",
         "messages",
         "a2a_tasks",
+        "scheduled_jobs",
     } <= tables
     assert "alembic_version" in tables
 
