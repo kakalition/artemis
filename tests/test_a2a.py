@@ -6,12 +6,15 @@ import httpx
 from a2a import types as t
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from sqlmodel import Session
 
 from artemis.a2a.client import A2AClient, _texts_from, load_peers
 from artemis.a2a.server import build_app, build_card
+from artemis.a2a.task_store import LibSQLTaskStore
 from artemis.config import Settings
 from artemis.db import create_db_engine, make_session_factory
 from artemis.db.migrations import bootstrap
+from artemis.db.repos import Repositories
 from artemis.services.runtime import Runtime
 
 BASE = "http://test"
@@ -61,6 +64,45 @@ async def test_client_roundtrip_against_inproc_server(tmp_path):
 
     reply = await client.call_agent(BASE, "hi")
     assert reply == "a2a hello"
+
+
+async def test_libsql_task_store_roundtrip(tmp_path):
+    store = LibSQLTaskStore(_runtime(tmp_path))
+    task = t.Task(
+        id="t1",
+        context_id="c1",
+        status=t.TaskStatus(state=t.TaskState.TASK_STATE_COMPLETED),
+        artifacts=[t.Artifact(parts=[t.Part(text="hi")])],
+    )
+    await store.save(task, None)  # type: ignore[arg-type]
+    got = await store.get("t1", None)  # type: ignore[arg-type]
+    assert got is not None and got.id == "t1"
+    assert got.artifacts[0].parts[0].text == "hi"
+
+    listing = await store.list(t.ListTasksRequest(), None)  # type: ignore[arg-type]
+    assert listing.total_size == 1
+
+    await store.delete("t1", None)  # type: ignore[arg-type]
+    assert await store.get("t1", None) is None  # type: ignore[arg-type]
+
+
+async def test_task_persisted_to_db(tmp_path):
+    runtime = _runtime(tmp_path)
+    app = build_app(
+        runtime.settings,
+        runtime=runtime,
+        registry=None,
+        a2a_client=A2AClient(),
+        model=_text_model(),
+    )
+    client = A2AClient(transport=httpx.ASGITransport(app))
+    reply = await client.call_agent(BASE, "persist me")
+    assert reply == "a2a hello"
+
+    with Session(runtime.engine) as session:
+        rows = Repositories(session, "owner").a2a.list()
+    assert rows and rows[0].state == "TASK_STATE_COMPLETED"
+    assert "a2a hello" in rows[0].payload
 
 
 def test_texts_from_stream_response():

@@ -32,8 +32,9 @@ server), **Babel** (currency precision/formatting), **python-dateutil** (dates),
   (`delete_transaction`) tools pause for approval — a CLI prompt or Telegram
   inline buttons — via PydanticAI deferred tools.
 - **Durable & resilient**: DBOS durable workflows/queues/schedules on a local
-  SQLite system DB; model timeouts, SDK retries, optional per-run usage caps,
-  and optional Logfire/OTel instrumentation.
+  SQLite system DB **and** A2A tasks persisted in libSQL (survive restarts);
+  model timeouts, SDK retries, optional per-run usage caps, and optional
+  Logfire/OTel instrumentation.
 - **MCP both ways**: consumes `apollo-charting` + `apollo-pdf-creator`, and
   serves a **full-agent** MCP server plus typed read-only tools.
 - **A2A both ways**: publishes an agent card + JSON-RPC server; the orchestrator
@@ -170,14 +171,13 @@ transports bind loopback by default and warn if exposed.
 ## A2A
 
 Both directions use the official **`a2a-sdk`**. `artemis a2a` serves the agent
-card at `/.well-known/agent-card.json` and JSON-RPC at `/`; an
-`AgentExecutor` answers with a single agent `Message` (the SDK's immediate-
-response workflow) whose text comes from the orchestrator, so replies are
-verbatim. Tasks are kept in the SDK's in-memory store (they do not survive
-restarts); the A2A executor answers with an immediate **Message** (no Task
-lifecycle), so durability is provided by the DBOS layer below rather than a task
-store. The outbound client resolves the peer's card and calls `message/send`
-through the SDK.
+card at `/.well-known/agent-card.json` and JSON-RPC at `/`. The executor uses the
+SDK's **task-based** flow: it enqueues a `Task`, then drives it `submitted →
+working → completed` (or `failed`), carrying the reply as an artifact. Tasks are
+persisted in libSQL through `LibSQLTaskStore` (the `a2a_tasks` table), so task
+state, history and artifacts survive restarts and are queryable via `tasks/get`
+and `ListTasks`. The outbound client resolves the peer's card and calls
+`message/send` through the SDK.
 
 ## Durability
 

@@ -17,12 +17,13 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
-from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.tasks import TaskUpdater
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from artemis.a2a.client import A2AClient, build_a2a_client
+from artemis.a2a.task_store import LibSQLTaskStore
 from artemis.config import Settings, build_model
 from artemis.mcp.registry import MCPRegistry
 from artemis.services.runtime import Runtime, build_deps, build_runtime, repositories
@@ -74,16 +75,35 @@ class FinanceAgentExecutor(AgentExecutor):
         self._bridge = bridge
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        text = await self._bridge.answer(context.get_user_input())
+        # Task-based flow: the SDK requires a Task event before any status
+        # update, so enqueue the initial Task, then drive it through
+        # working -> completed (or failed) with an artifact carrying the reply.
+        task_id = context.task_id or str(uuid.uuid4())
+        context_id = context.context_id or ""
         await event_queue.enqueue_event(
-            t.Message(
-                message_id=str(uuid.uuid4()),
-                role=t.Role.ROLE_AGENT,
-                parts=[t.Part(text=text)],
-                context_id=context.context_id,
-                task_id=context.task_id,
+            t.Task(
+                id=task_id,
+                context_id=context_id,
+                status=t.TaskStatus(state=t.TaskState.TASK_STATE_SUBMITTED),
             )
         )
+        updater = TaskUpdater(event_queue, task_id, context_id)
+        await updater.start_work()
+        try:
+            text = await self._bridge.answer(context.get_user_input())
+        except Exception as exc:  # surface failure as a failed task
+            await updater.failed(
+                message=t.Message(
+                    message_id=str(uuid.uuid4()),
+                    role=t.Role.ROLE_AGENT,
+                    parts=[t.Part(text=f"error: {type(exc).__name__}")],
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+            )
+            return
+        await updater.add_artifact([t.Part(text=text)], name="result")
+        await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
@@ -132,7 +152,7 @@ def build_app(
     bridge = A2ABridge(runtime, registry=registry, a2a_client=a2a_client, model=model)
     handler = DefaultRequestHandler(
         agent_executor=FinanceAgentExecutor(bridge),
-        task_store=InMemoryTaskStore(),
+        task_store=LibSQLTaskStore(runtime),
         agent_card=card,
     )
     async def healthz(request: Any) -> JSONResponse:

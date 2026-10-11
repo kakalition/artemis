@@ -7,6 +7,7 @@ of work.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -44,17 +45,25 @@ def build_runtime(settings: Settings | None = None) -> Runtime:
     return Runtime(settings=settings, engine=engine, session_factory=make_session_factory(engine))
 
 
+# Serialize database access: local libSQL/SQLite tolerates only one writer, and
+# the A2A task store writes from worker threads while agent turns run. A single
+# process-local re-entrant lock keeps concurrent writers from deadlocking on the
+# file lock.
+_db_lock = threading.RLock()
+
+
 @contextmanager
 def repositories(runtime: Runtime) -> Iterator[Repositories]:
-    session: Session = runtime.session_factory()  # type: ignore[operator]
-    try:
-        yield Repositories(session, runtime.settings.owner_id)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    with _db_lock:
+        session: Session = runtime.session_factory()  # type: ignore[operator]
+        try:
+            yield Repositories(session, runtime.settings.owner_id)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
 
 def build_deps(

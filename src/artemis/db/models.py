@@ -170,6 +170,7 @@ class A2ATaskRecord(SQLModel, table=True):
     __tablename__ = "a2a_tasks"
 
     id: str = Field(primary_key=True)
+    owner_id: str | None = Field(default=None, index=True)
     context_id: str | None = None
     state: str = "submitted"
     payload: str = "{}"

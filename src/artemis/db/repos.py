@@ -16,6 +16,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from artemis.db.models import (
+    A2ATaskRecord,
     Account,
     Budget,
     Category,
@@ -558,6 +559,55 @@ class MessageRepo:
         self.session.flush()
 
 
+class A2ATaskRepo:
+    """Durable store of A2A tasks (protobuf JSON payloads)."""
+
+    def __init__(self, session: Session, owner_id: str) -> None:
+        self.session = session
+        self.owner_id = owner_id
+
+    def upsert(
+        self,
+        task_id: str,
+        owner: str,
+        context_id: str | None,
+        state: str,
+        payload: str,
+    ) -> A2ATaskRecord:
+        existing = self.session.get(A2ATaskRecord, task_id)
+        if existing is not None:
+            existing.owner_id = owner
+            existing.context_id = context_id
+            existing.state = state
+            existing.payload = payload
+            existing.updated_at = datetime.now(UTC)
+            self.session.add(existing)
+            self.session.flush()
+            return existing
+        record = A2ATaskRecord(
+            id=task_id, owner_id=owner, context_id=context_id, state=state, payload=payload
+        )
+        self.session.add(record)
+        self.session.flush()
+        return record
+
+    def get(self, task_id: str) -> A2ATaskRecord | None:
+        return self.session.get(A2ATaskRecord, task_id)
+
+    def delete(self, task_id: str) -> None:
+        record = self.session.get(A2ATaskRecord, task_id)
+        if record is not None:
+            self.session.delete(record)
+            self.session.flush()
+
+    def list(self) -> list[A2ATaskRecord]:
+        return list(
+            self.session.exec(
+                select(A2ATaskRecord).order_by(A2ATaskRecord.updated_at.desc())
+            ).all()
+        )
+
+
 @dataclass
 class Repositories:
     """Container bundling every repository for one owner."""
@@ -576,3 +626,4 @@ class Repositories:
         self.prices = PriceSnapshotRepo(self.session, self.owner_id)
         self.conversations = ConversationRepo(self.session, self.owner_id)
         self.messages = MessageRepo(self.session, self.owner_id)
+        self.a2a = A2ATaskRepo(self.session, self.owner_id)
