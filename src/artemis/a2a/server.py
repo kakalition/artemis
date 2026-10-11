@@ -18,12 +18,12 @@ from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import TaskUpdater
+from agentkit.a2a.task_store import SQLAlchemyTaskStore
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from artemis.a2a.client import A2AClient, build_a2a_client
-from artemis.a2a.task_store import LibSQLTaskStore
 from artemis.config import Settings, build_model
 from artemis.mcp.registry import MCPRegistry
 from artemis.services.runtime import Runtime, build_deps, build_runtime, repositories
@@ -152,7 +152,7 @@ def build_app(
     bridge = A2ABridge(runtime, registry=registry, a2a_client=a2a_client, model=model)
     handler = DefaultRequestHandler(
         agent_executor=FinanceAgentExecutor(bridge),
-        task_store=LibSQLTaskStore(runtime),
+        task_store=SQLAlchemyTaskStore(runtime),
         agent_card=card,
     )
     async def healthz(request: Any) -> JSONResponse:

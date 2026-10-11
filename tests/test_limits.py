@@ -8,7 +8,6 @@ from artemis.services import ledger
 
 def _deps(repos, **overrides) -> Deps:
     return Deps(
-        owner_id="owner",
         repos=repos,
         settings=Settings(owner_id="owner", **overrides),
         price_source=ManualPriceSource(),

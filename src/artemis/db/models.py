@@ -143,36 +143,26 @@ class PriceSnapshot(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
-class Conversation(SQLModel, table=True):
-    __tablename__ = "conversations"
+# Conversation/Message/A2ATaskRecord are the generic infrastructure tables and
+# live in agentkit, so both packages share one definition on SQLModel.metadata.
+from agentkit.db.models import (  # noqa: E402
+    A2ATaskRecord,
+    Conversation,
+    Message,
+)
 
-    id: str = Field(primary_key=True)  # e.g. "cli:default", "tg:12345"
-    owner_id: str = Field(index=True, foreign_key="owners.id")
-    channel: str = "cli"
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
-
-
-class Message(SQLModel, table=True):
-    __tablename__ = "messages"
-    __table_args__ = (Index("ix_msg_conv_seq", "conversation_id", "seq"),)
-
-    id: int | None = Field(default=None, primary_key=True)
-    conversation_id: str = Field(index=True, foreign_key="conversations.id")
-    seq: int = 0
-    payload: str  # JSON-serialized ModelMessagesTypeAdapter payload
-    created_at: datetime = Field(default_factory=_utcnow)
-
-
-class A2ATaskRecord(SQLModel, table=True):
-    """Optional durable record of A2A tasks (InMemory broker is the default)."""
-
-    __tablename__ = "a2a_tasks"
-
-    id: str = Field(primary_key=True)
-    owner_id: str | None = Field(default=None, index=True)
-    context_id: str | None = None
-    state: str = "submitted"
-    payload: str = "{}"
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
+__all__ = [
+    "Owner",
+    "Account",
+    "Category",
+    "MerchantRule",
+    "Transaction",
+    "Budget",
+    "Goal",
+    "GoalContribution",
+    "Holding",
+    "PriceSnapshot",
+    "Conversation",
+    "Message",
+    "A2ATaskRecord",
+]

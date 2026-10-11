@@ -146,47 +146,8 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def build_model(settings: Settings | None = None):
-    """Build the PydanticAI model, pointing at the OpenAI-compatible gateway.
+# Model construction + resilience live in agentkit; Artemis passes its Settings
+# (same provider field names).
+from agentkit.config import build_model, model_settings, usage_limits  # noqa: E402
 
-    Dev/test keeps the default OpenAI provider but redirects ``base_url`` at the
-    CommandCode gateway when ``OPENAI_BASE_URL`` is set. Transport retries and
-    the per-request timeout are handled by the underlying async OpenAI client.
-    """
-    from openai import AsyncOpenAI
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.providers.openai import OpenAIProvider
-
-    settings = settings or get_settings()
-    client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
-        timeout=settings.model_timeout,
-        max_retries=settings.model_retries,
-    )
-    provider = OpenAIProvider(openai_client=client)
-    model_name = settings.model_name
-    if model_name.startswith("openai:"):
-        model_name = model_name.split(":", 1)[1]
-    return OpenAIChatModel(model_name, provider=provider)
-
-
-def model_settings(settings: Settings | None = None):
-    """Per-request model settings (timeout)."""
-    from pydantic_ai.settings import ModelSettings
-
-    settings = settings or get_settings()
-    return ModelSettings(timeout=settings.model_timeout)
-
-
-def usage_limits(settings: Settings | None = None):
-    """Per-run usage caps, or ``None`` when unlimited."""
-    from pydantic_ai.usage import UsageLimits
-
-    settings = settings or get_settings()
-    if settings.usage_request_limit is None and settings.usage_total_tokens_limit is None:
-        return None
-    return UsageLimits(
-        request_limit=settings.usage_request_limit,
-        total_tokens_limit=settings.usage_total_tokens_limit,
-    )
+__all__ = ["Settings", "get_settings", "build_model", "model_settings", "usage_limits"]

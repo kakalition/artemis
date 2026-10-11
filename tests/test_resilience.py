@@ -1,7 +1,8 @@
 import sys
 import types
 
-import artemis.observability as observability
+import agentkit.observability as observability
+
 from artemis.config import Settings, build_model, model_settings, usage_limits
 from artemis.observability import setup_logfire
 

@@ -26,7 +26,6 @@ from artemis.prices.base import ManualPriceSource
 @pytest.fixture
 def agent_deps(repos) -> Deps:
     return Deps(
-        owner_id="owner",
         repos=repos,
         settings=Settings(owner_id="owner"),
         price_source=ManualPriceSource(),

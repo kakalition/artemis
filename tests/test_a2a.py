@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import httpx
 from a2a import types as t
+from agentkit.a2a.task_store import SQLAlchemyTaskStore
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlmodel import Session
 
 from artemis.a2a.client import A2AClient, _texts_from, load_peers
 from artemis.a2a.server import build_app, build_card
-from artemis.a2a.task_store import LibSQLTaskStore
 from artemis.config import Settings
 from artemis.db import create_db_engine, make_session_factory
 from artemis.db.migrations import bootstrap
@@ -67,7 +67,7 @@ async def test_client_roundtrip_against_inproc_server(tmp_path):
 
 
 async def test_libsql_task_store_roundtrip(tmp_path):
-    store = LibSQLTaskStore(_runtime(tmp_path))
+    store = SQLAlchemyTaskStore(_runtime(tmp_path))
     task = t.Task(
         id="t1",
         context_id="c1",

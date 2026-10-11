@@ -63,7 +63,6 @@ def _pdf_server() -> FastMCP:
 
 def _deps(repos, registry) -> Deps:
     return Deps(
-        owner_id="owner",
         repos=repos,
         settings=Settings(owner_id="owner"),
         price_source=ManualPriceSource(),

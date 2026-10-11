@@ -1,15 +1,9 @@
-"""The orchestrator agent.
-
-It routes each request to one specialist via a hand-written delegation tool
-(PydanticAI v2 removed ``Agent.as_tool``; the supported core pattern is a tool
-that calls ``specialist.run(...)`` and forwards deps/usage/model).
-"""
+"""The orchestrator agent — routes requests to specialists via agentkit."""
 
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic_ai import Agent, RunContext
+from agentkit.orchestrator import Orchestrator
+from pydantic_ai import RunContext
 
 from artemis.agents.budgets import budgets_agent
 from artemis.agents.deps import Deps
@@ -19,55 +13,34 @@ from artemis.agents.portfolio import portfolio_agent
 from artemis.agents.prompts import ORCHESTRATOR_INSTRUCTIONS
 from artemis.agents.transactions import transactions_agent
 
-orchestrator_agent = Agent(
+_orchestrator = Orchestrator(
     name="artemis",
-    deps_type=Deps,
-    output_type=str,
     instructions=ORCHESTRATOR_INSTRUCTIONS,
+    deps_type=Deps,
 )
 
+for _agent, _tool, _description in (
+    (
+        transactions_agent,
+        "handle_transactions",
+        "Record expenses/income, search transactions, categorize, or import CSV.",
+    ),
+    (budgets_agent, "handle_budgets", "Set budgets or report budget-vs-actual for a period."),
+    (
+        goals_agent,
+        "handle_goals",
+        "Create savings goals, record contributions, and project progress.",
+    ),
+    (
+        portfolio_agent,
+        "handle_portfolio",
+        "Manage holdings/prices and report allocation and unrealized P/L.",
+    ),
+    (insights_agent, "handle_insights", "Answer read-only spending questions."),
+):
+    _orchestrator.add_specialist(_agent, tool_name=_tool, description=_description)
 
-async def _delegate(ctx: RunContext[Deps], agent: Agent[Any, str], request: str) -> str:
-    result = await agent.run(
-        request,
-        deps=ctx.deps,
-        usage=ctx.usage,
-        model=ctx.deps.model,
-    )
-    return result.output
-
-
-@orchestrator_agent.tool
-async def handle_transactions(ctx: RunContext[Deps], request: str) -> str:
-    """Record expenses/income, search transactions, categorize, or import CSV.
-
-    Pass the user's full request verbatim.
-    """
-    return await _delegate(ctx, transactions_agent, request)
-
-
-@orchestrator_agent.tool
-async def handle_budgets(ctx: RunContext[Deps], request: str) -> str:
-    """Set budgets or report budget-vs-actual for a period."""
-    return await _delegate(ctx, budgets_agent, request)
-
-
-@orchestrator_agent.tool
-async def handle_goals(ctx: RunContext[Deps], request: str) -> str:
-    """Create savings goals, record contributions, and project progress."""
-    return await _delegate(ctx, goals_agent, request)
-
-
-@orchestrator_agent.tool
-async def handle_portfolio(ctx: RunContext[Deps], request: str) -> str:
-    """Manage holdings/prices and report allocation and unrealized P/L."""
-    return await _delegate(ctx, portfolio_agent, request)
-
-
-@orchestrator_agent.tool
-async def handle_insights(ctx: RunContext[Deps], request: str) -> str:
-    """Answer read-only spending questions (by category/merchant/period/trend)."""
-    return await _delegate(ctx, insights_agent, request)
+orchestrator_agent = _orchestrator.agent
 
 
 @orchestrator_agent.tool

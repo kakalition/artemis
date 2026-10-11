@@ -91,8 +91,11 @@ async def set_price(
 async def refresh_prices(ctx: RunContext[Deps]) -> list[HoldingRecord]:
     """Refresh prices for all holdings from the configured price source."""
     holdings = ctx.deps.repos.holdings.list()
+    price_source = ctx.deps.price_source
+    if price_source is None:
+        return [_record(ctx, holding) for holding in holdings]
     for holding in holdings:
-        quote = await ctx.deps.price_source.quote(holding.symbol, holding.currency)
+        quote = await price_source.quote(holding.symbol, holding.currency)
         if quote is not None:
             ctx.deps.repos.prices.add(
                 holding.symbol,

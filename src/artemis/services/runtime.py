@@ -1,19 +1,16 @@
 """Process runtime: settings -> engine -> repositories -> deps.
 
-Owns the SQLAlchemy engine and session factory. Front-ends (CLI, Telegram) use
-:func:`repositories` to get an owner-scoped :class:`Repositories` for one unit
-of work.
+``Runtime`` is duck-type compatible with :class:`agentkit.runtime.Runtime`, and
+``repositories`` delegates to agentkit so there is a single process-wide write
+lock shared by the app and the A2A task store.
 """
 
 from __future__ import annotations
 
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from agentkit.runtime import repositories as _agentkit_repositories
 from sqlalchemy import Engine
-from sqlmodel import Session
 
 from artemis.agents.deps import ApprovalCallback, Deps
 from artemis.config import Settings, get_settings
@@ -29,6 +26,7 @@ class Runtime:
     settings: Settings
     engine: Engine
     session_factory: object
+    repos_factory: type = field(default=Repositories)
 
 
 def build_price_source(settings: Settings) -> PriceSource:
@@ -45,25 +43,9 @@ def build_runtime(settings: Settings | None = None) -> Runtime:
     return Runtime(settings=settings, engine=engine, session_factory=make_session_factory(engine))
 
 
-# Serialize database access: local libSQL/SQLite tolerates only one writer, and
-# the A2A task store writes from worker threads while agent turns run. A single
-# process-local re-entrant lock keeps concurrent writers from deadlocking on the
-# file lock.
-_db_lock = threading.RLock()
-
-
-@contextmanager
-def repositories(runtime: Runtime) -> Iterator[Repositories]:
-    with _db_lock:
-        session: Session = runtime.session_factory()  # type: ignore[operator]
-        try:
-            yield Repositories(session, runtime.settings.owner_id)
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+def repositories(runtime: Runtime):
+    """Owner-scoped repositories (shared lock, from agentkit)."""
+    return _agentkit_repositories(runtime)
 
 
 def build_deps(
@@ -76,9 +58,8 @@ def build_deps(
     approve: ApprovalCallback | None = None,
 ) -> Deps:
     return Deps(
-        owner_id=runtime.settings.owner_id,
-        repos=repos,
         settings=runtime.settings,
+        repos=repos,
         price_source=build_price_source(runtime.settings),
         model=model,
         mcp=mcp,  # type: ignore[arg-type]

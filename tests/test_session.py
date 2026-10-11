@@ -18,7 +18,6 @@ def _text_model(text: str) -> FunctionModel:
 
 def _deps(repos) -> Deps:
     return Deps(
-        owner_id="owner",
         repos=repos,
         settings=Settings(owner_id="owner"),
         price_source=ManualPriceSource(),
