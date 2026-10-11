@@ -44,8 +44,13 @@ class Settings(BaseSettings):
     # Optional per-run usage caps (None = unlimited).
     usage_request_limit: int | None = None
     usage_total_tokens_limit: int | None = None
-    # Optional Logfire/OpenTelemetry token; when set, pydantic-ai is instrumented.
+    # Observability: off | console | otlp | logfire (cloud, free tier).
+    # "console" prints spans locally; "otlp" exports to any OpenTelemetry
+    # backend (Jaeger, Grafana Tempo, Arize Phoenix, …) — both are free and
+    # need no account. "logfire" sends to logfire.dev and needs a token.
+    observability: str = "off"
     logfire_token: str | None = None
+    otlp_endpoint: str | None = None
 
     # --- imports --------------------------------------------------------
     max_import_bytes: int = 5_000_000

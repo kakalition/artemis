@@ -63,7 +63,9 @@ automatically.
 | `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
 | `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Per-request timeout and SDK retries. |
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Optional per-run caps. |
-| `LOGFIRE_TOKEN` | – | Enables Logfire/OTel instrumentation. |
+| `OBSERVABILITY` | `off` | `off` \| `console` (local) \| `otlp` (local backend) \| `logfire` (cloud free tier). |
+| `OTLP_ENDPOINT` | – | OTLP endpoint for `observability=otlp`. |
+| `LOGFIRE_TOKEN` | – | Token for `observability=logfire` (also enables cloud if set). |
 | `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports. |
 | `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The single owner. |
 | `LIBSQL_URL` | local file under `ARTEMIS_HOME` | `sqlite+libsql:///…` or Turso. |
