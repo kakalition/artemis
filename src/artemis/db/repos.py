@@ -519,6 +519,20 @@ class ConversationRepo:
             self.session.add(conv)
             self.session.flush()
 
+    def get(self, conversation_id: str) -> Conversation | None:
+        return self.session.get(Conversation, conversation_id)
+
+    def list(self, limit: int | None = None) -> list[Conversation]:
+        stmt = (
+            select(Conversation)
+            .where(Conversation.owner_id == self.owner_id)
+            .order_by(Conversation.updated_at.desc())
+        )
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
+
 
 class MessageRepo:
     def __init__(self, session: Session, owner_id: str) -> None:

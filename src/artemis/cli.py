@@ -436,13 +436,14 @@ def up(
 
     settings = get_settings()
     run_bot_enabled = bot and bool(settings.telegram_bot_token)
-    if not (a2a or mcp or run_bot_enabled):
+    if not (a2a or mcp or run_bot_enabled or settings.webui_enabled):
         typer.echo("nothing to run")
         return
 
     _enable_observability()
     durability.init(settings)
     scheduler.init_scheduler(settings)
+    runtime = build_runtime(settings)
 
     services: list[Service] = []
     if a2a:
@@ -459,7 +460,24 @@ def up(
         services.append(Service("bot", lambda: run_bot(settings)))
 
     typer.echo("artemis up: " + ", ".join(service.name for service in services))
-    run_all(services)
+    run_all(
+        services,
+        settings=settings,
+        runtime=runtime,
+        webui_answer=_webui_answer(runtime),
+    )
+
+
+def _webui_answer(runtime):
+    """A ``(conversation_id, text) -> ChatResult`` chat callable for the web UI."""
+
+    async def answer(conversation_id: str, text: str):
+        with repositories(runtime) as repos:
+            deps = build_deps(runtime, repos, model=build_model(runtime.settings))
+            runner = ChatRunner(deps, conversation_id=conversation_id)
+            return await runner.send(text)
+
+    return answer
 
 
 @app.command()

@@ -43,6 +43,8 @@ def test_import_export_backup(tmp_path, monkeypatch):
 
 def test_up_with_nothing_enabled(tmp_path, monkeypatch):
     runner = _prepare(tmp_path, monkeypatch)
+    monkeypatch.setenv("WEBUI_ENABLED", "false")
+    get_settings.cache_clear()
     result = runner.invoke(app, ["up", "--no-a2a", "--no-mcp", "--no-bot"])
     assert result.exit_code == 0, result.output
     assert "nothing to run" in result.output

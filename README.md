@@ -11,19 +11,36 @@ charts and PDFs. Artemis is the finance domain; agentkit is the plumbing.
 [![CI](https://github.com/kakalition/artemis/actions/workflows/ci.yml/badge.svg)](https://github.com/kakalition/artemis/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-120-brightgreen)
+![Tests](https://img.shields.io/badge/tests-119-brightgreen)
 
 > Educational guidance only — not regulated financial advice. Artemis never
 > moves money.
 
 ---
 
+## Why Artemis
+
+- **Ask your money anything.** "How much did I spend on groceries last month?",
+  "am I on budget?", "what's my portfolio worth?" — answered from your real data.
+- **Numbers you can trust.** Every amount is integer minor units + an ISO
+  currency; no `float` anywhere, no silent FX conversions.
+- **Six specialists, one agent.** Transactions, budgets, goals, portfolio,
+  insights, and reports, behind a routing orchestrator.
+- **Reports you can keep.** One command turns a month into a Markdown summary, a
+  PNG chart, or a PDF — on demand or on a schedule.
+- **Durable and safe.** Bulk/destructive actions require approval; every write is
+  audited; background jobs survive restarts.
+- **An operator console.** `artemis up` serves a web UI for chat, spending,
+  schedules, workflows, usage, audit, and your persona.
+
 ## Table of contents
 
+- [Why Artemis](#why-artemis)
 - [Features](#features)
 - [Install](#install)
 - [Configure](#configure)
 - [CLI](#cli)
+- [Web UI](#web-ui)
 - [CSV import](#csv-import)
 - [Telegram](#telegram)
 - [MCP](#mcp)
@@ -72,6 +89,15 @@ cp .env.example .env               # then edit
 Requires **Python 3.11–3.12** and [uv](https://docs.astral.sh/uv/). Optional free
 market data: `uv sync --extra prices`.
 
+### Quickstart
+
+```bash
+export OPENAI_API_KEY=sk-...          # or put it in .env
+uv run artemis import statement.csv   # import a bank statement
+uv run artemis report --period 2025-01 --chart
+uv run artemis up                     # worker + A2A + MCP + bot + web UI (:8787)
+```
+
 ## Configure
 
 Environment variables (see `.env.example`); `.env` is loaded automatically.
@@ -85,8 +111,10 @@ Environment variables (see `.env.example`); `.env` is loaded automatically.
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
 | `OWNER_ID` / `OWNER_NAME` | `owner` / `Owner` | The owner |
 | `LIBSQL_URL` / `LIBSQL_AUTH_TOKEN` | local file | `sqlite+libsql://…` or Turso |
-| `ARTEMIS_HOME` | `~/.local/share/artemis` | DB + artifacts + logs |
-| `SOUL_FILE` | `./SOUL.md` or `$ARTEMIS_HOME/SOUL.md` | Persona |
+| `AGENTKIT_HOME` | `~/.agentkit` | Workspace root (`~/.agentkit/artemis`) |
+| `ARTEMIS_HOME` / `AGENT_HOME` | `~/.agentkit/artemis` | Explicit home override |
+| `SOUL_FILE` | `./SOUL.md` or `$AGENT_HOME/SOUL.md` | Persona |
+| `WEBUI_ENABLED` / `WEBUI_HOST` / `WEBUI_PORT` | `true` / `127.0.0.1` / `8787` | Operator web UI |
 | `TELEGRAM_BOT_TOKEN` | – | Enables `artemis bot` |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | (all) | Chat allowlist |
 | `PRICE_SOURCE` | `manual` | `manual` or `yfinance` |
@@ -102,7 +130,7 @@ Environment variables (see `.env.example`); `.env` is loaded automatically.
 ## CLI
 
 ```bash
-artemis up                                     # run everything: worker + A2A + MCP + bot
+artemis up                                     # everything: worker + A2A + MCP + bot + web UI
 artemis chat                                   # interactive agent
 artemis import statement.csv [--dayfirst]      # import CSV/bank statement
 artemis report --period 2026-01 [--chart --pdf] [--out DIR]
@@ -122,6 +150,16 @@ artemis workflows [--status ERROR] [--show ID] [--cancel ID] [--resume ID]
 artemis backup ~/artemis-backup.db ; artemis export --out tx.json --format json
 artemis db upgrade ; artemis soul [--init]
 ```
+
+## Web UI
+
+`artemis up` also serves an operator web UI at `http://127.0.0.1:8787` (loopback,
+no auth) for **this agent only**: inspect conversations/chat, usage, audit, A2A
+tasks and durable workflows; manage schedules, cancel/resume workflows, edit the
+SOUL persona, view config (secrets masked) and artifacts. Chat runs through the
+same `ChatRunner`/orchestrator as the CLI, so history is shared. Data now lives
+under `~/.agentkit/artemis` (see `agentkit workspace migrate artemis` if you are
+upgrading from `~/.local/share/artemis`).
 
 ## CSV import
 
@@ -248,7 +286,7 @@ Parsing is `str → Decimal → int`; formatting is `int → Decimal → str`
 ## Development
 
 ```bash
-uv run pytest            # 120 tests
+uv run pytest            # 119 tests (unit + CLI)
 uv run ruff check src tests
 uv run mypy src/artemis
 bash tests/smoke.sh      # CLI end-to-end in a temp HOME

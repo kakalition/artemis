@@ -1,7 +1,7 @@
 """Artemis settings — agentkit's :class:`AgentSettings` plus finance options.
 
-The data directory is ``agent_home`` (agentkit) and honours the legacy
-``ARTEMIS_HOME`` env var, so existing configs keep working.
+Data lives under agentkit's workspace root at ``~/.agentkit/artemis`` by
+default; the legacy ``ARTEMIS_HOME`` env var is still honoured as an override.
 """
 
 from __future__ import annotations
@@ -10,19 +10,17 @@ from functools import lru_cache
 from pathlib import Path
 
 from agentkit.config import AgentSettings, build_model, model_settings, usage_limits  # noqa: F401
-from pydantic import AliasChoices, Field, field_validator
-
-
-def _default_home() -> Path:
-    return Path("~/.local/share/artemis").expanduser()
+from pydantic import AliasChoices, Field
 
 
 class Settings(AgentSettings):
     """Artemis runtime settings."""
 
+    agent_name: str = "artemis"
+
     # Data directory. ``agent_home`` is agentkit's field; accept ARTEMIS_HOME too.
-    agent_home: Path = Field(
-        default_factory=_default_home,
+    agent_home: Path | None = Field(
+        default=None,
         validation_alias=AliasChoices("ARTEMIS_HOME", "AGENT_HOME"),
     )
 
@@ -38,15 +36,10 @@ class Settings(AgentSettings):
     pdf_mcp_url: str | None = None
     mcp_auto_approve: bool = False
 
-    @field_validator("agent_home", mode="before")
-    @classmethod
-    def _expand_home(cls, value: object) -> object:
-        return Path(value).expanduser() if isinstance(value, str) else value
-
     # --- derived --------------------------------------------------------
     @property
     def db_path(self) -> Path:
-        return self.agent_home / "artemis.db"
+        return self.home / "artemis.db"
 
     @property
     def resolved_database_url(self) -> str:
@@ -57,20 +50,12 @@ class Settings(AgentSettings):
         return f"sqlite+libsql:///{self.db_path}"
 
     @property
-    def artifacts_dir(self) -> Path:
-        return self.agent_home / "artifacts"
-
-    @property
     def charting_path(self) -> Path:
         return Path(self.charting_dir).expanduser()
 
     @property
     def pdf_path(self) -> Path:
         return Path(self.pdf_dir).expanduser()
-
-    def ensure_dirs(self) -> None:
-        self.agent_home.mkdir(parents=True, exist_ok=True)
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

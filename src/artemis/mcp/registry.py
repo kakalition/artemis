@@ -30,7 +30,7 @@ class MCPRegistry(_BaseRegistry):
             specs[0].transport = chart_client
         if pdf_client is not None:
             specs[1].transport = pdf_client
-        super().__init__(specs, log_dir=settings.agent_home / "logs")
+        super().__init__(specs, log_dir=settings.logs_dir)
 
     @staticmethod
     def _chart_spec(settings: Settings) -> MCPServerSpec:

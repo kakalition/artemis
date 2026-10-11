@@ -6,6 +6,7 @@ migration runner (alembic) can be layered on later behind this module.
 
 from __future__ import annotations
 
+from agentkit.db.migrations import sync_missing_columns
 from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, select
 
@@ -30,8 +31,9 @@ DEFAULT_INCOME_CATEGORIES = ["Salary", "Interest", "Gifts", "Refunds", "Income"]
 
 
 def init_db(engine: Engine) -> None:
-    """Create all tables if they do not exist."""
+    """Create all tables if they do not exist, and reconcile additive drift."""
     SQLModel.metadata.create_all(engine)
+    sync_missing_columns(engine)
 
 
 def seed_owner(session: Session, owner_id: str, owner_name: str = "Owner") -> Owner:
