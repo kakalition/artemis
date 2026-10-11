@@ -159,6 +159,7 @@ def chat(
 
 
 async def _chat(conv: str, with_mcp: bool) -> None:
+    _enable_observability()
     runtime = build_runtime()
     registry = MCPRegistry(runtime.settings) if with_mcp else None
     async with contextlib.AsyncExitStack() as stack:
@@ -370,6 +371,7 @@ def bot() -> None:
     """Run the Telegram bot (long-polling)."""
     from artemis.gateways.telegram_bot import run_bot
 
+    _enable_observability()
     run_bot(get_settings())
 
 
@@ -382,6 +384,7 @@ def mcp(
     """Run Artemis as an MCP server (full agent + read-only tools)."""
     from artemis.mcp.server import serve
 
+    _enable_observability()
     serve(get_settings(), transport=transport, host=host, port=port)
 
 
@@ -390,6 +393,7 @@ def a2a() -> None:
     """Run Artemis as an A2A server (agent card + JSON-RPC)."""
     from artemis.a2a.server import serve
 
+    _enable_observability()
     serve(get_settings())
 
 
@@ -402,6 +406,7 @@ def worker() -> None:
 
     from artemis import durability
 
+    _enable_observability()
     settings = get_settings()
     durability.init(settings)  # register the report queue
     scheduler.init_scheduler(settings)  # register the tick + worker queue
@@ -428,7 +433,6 @@ def up(
     from agentkit.supervise import Service, run_all
 
     from artemis import durability
-    from artemis.observability import setup_logging, setup_observability
 
     settings = get_settings()
     run_bot_enabled = bot and bool(settings.telegram_bot_token)
@@ -436,8 +440,7 @@ def up(
         typer.echo("nothing to run")
         return
 
-    setup_logging(settings)
-    setup_observability(settings)
+    _enable_observability()
     durability.init(settings)
     scheduler.init_scheduler(settings)
 
@@ -457,6 +460,38 @@ def up(
 
     typer.echo("artemis up: " + ", ".join(service.name for service in services))
     run_all(services)
+
+
+@app.command()
+def workflows(
+    show: str | None = typer.Option(None, "--show", help="Workflow id to inspect."),
+    cancel: str | None = typer.Option(None, "--cancel", help="Cancel a workflow id."),
+    resume: str | None = typer.Option(None, "--resume", help="Resume a workflow id."),
+    status: str | None = typer.Option(None, "--status", help="Filter by status (e.g. ERROR)."),
+    limit: int = typer.Option(20, "--limit"),
+) -> None:
+    """Inspect and manage durable (DBOS) workflows."""
+    from artemis import durability
+
+    db = durability.client(get_settings())
+    if cancel:
+        db.cancel_workflow(cancel)
+        typer.echo(f"cancelled {cancel}")
+        return
+    if resume:
+        db.resume_workflow(resume)
+        typer.echo(f"resumed {resume}")
+        return
+    if show:
+        wf = db.retrieve_workflow(show).get_status()
+        typer.echo(f"{wf.workflow_id}  {wf.status}  {wf.name}  queue={wf.queue_name}")
+        return
+    rows = db.list_workflows(status=status, limit=limit, sort_desc=True)
+    if not rows:
+        typer.echo("no workflows")
+        return
+    for row in rows:
+        typer.echo(f"{row.workflow_id[:14]}  {str(row.status):24}  {row.name}")
 
 
 @app.command("job-report")
@@ -543,12 +578,17 @@ def schedule_remove(name: str = typer.Argument(...)) -> None:
     typer.echo("removed" if removed else "not found")
 
 
-def main() -> None:
-    from artemis.observability import setup_logging, setup_observability
+def _enable_observability() -> None:
+    """Enable tracing for long-running commands (not one-shot CLI calls)."""
+    from artemis.observability import setup_observability
 
-    settings = get_settings()
-    setup_logging(settings)
-    setup_observability(settings)
+    setup_observability(get_settings())
+
+
+def main() -> None:
+    from artemis.observability import setup_logging
+
+    setup_logging(get_settings())
     app()
 
 

@@ -5,7 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "== syncing dependencies (uv) =="
-uv sync --extra dev
+# includes the local Phoenix observability UI (on by default)
+uv sync --extra dev --extra observability-phoenix
 
 if [ ! -f .env ]; then
   echo "== creating .env from .env.example =="

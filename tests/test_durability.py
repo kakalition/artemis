@@ -49,6 +49,12 @@ def test_durable_turn_runs_and_persists(durability):
         assert repos.messages.list("cli:durable-test")
 
 
+def test_workflow_client(durability):
+    db = durability.client(durability.get_settings())
+    rows = db.list_workflows(limit=5)
+    assert isinstance(rows, list)
+
+
 def test_durable_report_job(durability):
     result = durability.run_report_job("this-month")
     assert "Spending report" in result["text"]

@@ -76,7 +76,7 @@ automatically.
 | `MODEL_NAME` | `openai:gpt-4o-mini` | PydanticAI model id. |
 | `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Per-request timeout and SDK retries. |
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Optional per-run caps. |
-| `OBSERVABILITY` | `console` | `console` \| `otlp` \| `phoenix` \| `off`. Self-hosted, no account. |
+| `OBSERVABILITY` | `phoenix` | `phoenix` (local UI) \| `console` \| `otlp` \| `off`. Self-hosted, no account. |
 | `OTLP_ENDPOINT` | – | OTLP endpoint for `observability=otlp` (Phoenix/Jaeger/Tempo/Langfuse). |
 | `LOG_JSON` | `false` | Emit structured JSON logs with correlation ids. |
 | `MAX_IMPORT_BYTES` | `5000000` | Reject larger CSV imports. |
@@ -122,6 +122,7 @@ artemis db revision -m "add something"         # autogenerate a migration
 artemis soul                                   # show the active persona
 artemis soul --init                            # scaffold a SOUL.md
 artemis up                                     # run everything: worker + A2A + MCP + bot
+artemis workflows [--status ERROR] [--show ID] [--cancel ID] [--resume ID]
 ```
 
 `report --chart/--pdf` renders artifacts through the MCP servers **without** an

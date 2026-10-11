@@ -19,6 +19,15 @@ from typing import Any
 
 from agentkit import durability as _durability
 from agentkit import scheduler
+from agentkit.durability import (  # noqa: F401  (re-exported DBOS surface)
+    cancel_workflow,
+    client,
+    get_event,
+    get_workflow,
+    list_workflows,
+    resume_workflow,
+    sleep,
+)
 from dbos import DBOS, SetWorkflowID
 
 from artemis.config import Settings, build_model, get_settings, model_settings, usage_limits
